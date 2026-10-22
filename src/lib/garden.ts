@@ -216,23 +216,66 @@ export function startGarden(
   let carry = 0; // arc length since the last emitted point
   const STEP = 3;
 
+  // A sharp reversal would otherwise be smoothed into a hairpin, which a
+  // rake this wide sweeps as a big half circle. Past CORNER the rake is
+  // lifted at the turn and set down facing the new way: the stroke runs
+  // straight to the corner, ends there, and a new one starts from it.
+  // Heading is measured over HEADING_MIN px so hand jitter can't fake a turn.
+  const CORNER = Math.cos((115 * Math.PI) / 180);
+  const HEADING_MIN = 6;
+  let heading: Pt | null = null;
+  let anchor: Pt | null = null;
+
   const end = () => {
     if (pending.length) sand.extendStroke(pending, TINES, SPACING);
     pending = [];
     raw = null;
     mid = null;
+    heading = null;
+    anchor = null;
     sand.endStroke();
+  };
+
+  const corner = (c: Pt, from: Pt) => {
+    const d = Math.hypot(c.x - from.x, c.y - from.y);
+    const n = Math.ceil(d);
+    for (let i = 1; i <= n; i++) {
+      carry += d / n;
+      if (carry >= STEP || i === n) {
+        pending.push({ x: from.x + ((c.x - from.x) * i) / n, y: from.y + ((c.y - from.y) * i) / n });
+        carry = 0;
+      }
+    }
+    if (pending.length) sand.extendStroke(pending, TINES, SPACING);
+    pending = [];
+    sand.endStroke();
+    sand.beginStroke(c.x, c.y);
+    raw = c;
+    mid = c;
   };
 
   const add = (p: Pt) => {
     if (!raw || !mid) {
       raw = p;
       mid = p;
+      anchor = p;
+      heading = null;
       carry = 0;
       sand.beginStroke(p.x, p.y);
       return;
     }
     if (Math.hypot(p.x - raw.x, p.y - raw.y) < 0.5) return;
+    if (anchor) {
+      const hx = p.x - anchor.x;
+      const hy = p.y - anchor.y;
+      const hd = Math.hypot(hx, hy);
+      if (hd >= HEADING_MIN) {
+        const h = { x: hx / hd, y: hy / hd };
+        if (heading && heading.x * h.x + heading.y * h.y < CORNER) corner(raw, mid);
+        heading = h;
+        anchor = p;
+      }
+    }
     const next = { x: (raw.x + p.x) / 2, y: (raw.y + p.y) / 2 };
     const out: Pt[] = [];
     const approx = Math.hypot(raw.x - mid.x, raw.y - mid.y) + Math.hypot(next.x - raw.x, next.y - raw.y);
