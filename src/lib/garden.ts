@@ -210,76 +210,75 @@ export function startGarden(
   // curves between midpoints, with each sample as the control point) and
   // resampled every STEP px, so sparse samples from a fast flick still give
   // a smooth curve rather than a polyline.
+  //
+  // A sharp change of direction is the exception: smoothed, a reversal
+  // becomes a hairpin, and a rake this wide sweeps a hairpin as a big half
+  // circle. A turn can only be recognised once the pointer has moved a little
+  // the new way, so the newest HOLD px of path are held back from the sand.
+  // When the newest TURN_NEW px point more than 115 degrees away from the
+  // TURN_OLD px before them, the stroke ends exactly at the apex of the turn
+  // (the furthest point along the old heading), the held hairpin is dropped,
+  // and a new stroke starts from the apex in the new direction. Comparing
+  // stretches rather than single steps catches a hand that slows and curves
+  // through a reversal; if the pointer stops, what's held is raked at once.
   type Pt = { x: number; y: number };
-  let raw: Pt | null = null; // latest sample: the next curve's control point
-  let mid: Pt | null = null; // where the drawn path currently ends
-  let carry = 0; // arc length since the last emitted point
   const STEP = 3;
-
-  // A sharp reversal would otherwise be smoothed into a hairpin, which a
-  // rake this wide sweeps as a big half circle. Past CORNER the rake is
-  // lifted at the turn and set down facing the new way: the stroke runs
-  // straight to the corner, ends there, and a new one starts from it.
-  // Heading is measured over HEADING_MIN px so hand jitter can't fake a turn.
+  const MIN_MOVE = 2; // smaller moves are resting-hand jitter
   const CORNER = Math.cos((115 * Math.PI) / 180);
-  const HEADING_MIN = 6;
-  let heading: Pt | null = null;
-  let anchor: Pt | null = null;
+  const TURN_NEW = 12;
+  const TURN_OLD = 35;
+  const HOLD = 26;
+
+  let raw: Pt | null = null; // latest sample: the next curve's control point
+  let mid: Pt | null = null; // where the smoothed path currently ends
+  let carry = 0; // arc length since the last emitted point
+  let hist: { p: Pt; s: number }[] = []; // recent samples with arc length
+  let held: { p: Pt; s: number }[] = []; // smoothed points not yet raked
+  let pathS = 0; // arc length of the smoothed path
+  let lastOut: Pt | null = null; // last smoothed point produced
+  let lastRaked: Pt | null = null; // last point sent to the sand
+  let idle = 0;
+
+  const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+
+  const rake = (q: Pt) => {
+    pending.push(q);
+    lastRaked = q;
+  };
+
+  // Rake held points up to arc length upTo.
+  const commit = (upTo: number) => {
+    while (held.length && held[0].s <= upTo) rake(held.shift()!.p);
+  };
+
+  const begin = (p: Pt) => {
+    raw = p;
+    mid = p;
+    carry = 0;
+    hist = [{ p, s: 0 }];
+    held = [];
+    pathS = 0;
+    lastOut = p;
+    lastRaked = p;
+    sand.beginStroke(p.x, p.y);
+  };
 
   const end = () => {
+    clearTimeout(idle);
+    commit(Infinity);
     if (pending.length) sand.extendStroke(pending, TINES, SPACING);
     pending = [];
     raw = null;
     mid = null;
-    heading = null;
-    anchor = null;
+    hist = [];
+    held = [];
     sand.endStroke();
   };
 
-  const corner = (c: Pt, from: Pt) => {
-    const d = Math.hypot(c.x - from.x, c.y - from.y);
-    const n = Math.ceil(d);
-    for (let i = 1; i <= n; i++) {
-      carry += d / n;
-      if (carry >= STEP || i === n) {
-        pending.push({ x: from.x + ((c.x - from.x) * i) / n, y: from.y + ((c.y - from.y) * i) / n });
-        carry = 0;
-      }
-    }
-    if (pending.length) sand.extendStroke(pending, TINES, SPACING);
-    pending = [];
-    sand.endStroke();
-    sand.beginStroke(c.x, c.y);
-    raw = c;
-    mid = c;
-  };
-
-  const add = (p: Pt) => {
-    if (!raw || !mid) {
-      raw = p;
-      mid = p;
-      anchor = p;
-      heading = null;
-      carry = 0;
-      sand.beginStroke(p.x, p.y);
-      return;
-    }
-    if (Math.hypot(p.x - raw.x, p.y - raw.y) < 0.5) return;
-    if (anchor) {
-      const hx = p.x - anchor.x;
-      const hy = p.y - anchor.y;
-      const hd = Math.hypot(hx, hy);
-      if (hd >= HEADING_MIN) {
-        const h = { x: hx / hd, y: hy / hd };
-        if (heading && heading.x * h.x + heading.y * h.y < CORNER) corner(raw, mid);
-        heading = h;
-        anchor = p;
-      }
-    }
+  const smoothTo = (p: Pt) => {
+    if (!raw || !mid) return;
     const next = { x: (raw.x + p.x) / 2, y: (raw.y + p.y) / 2 };
-    const out: Pt[] = [];
-    const approx = Math.hypot(raw.x - mid.x, raw.y - mid.y) + Math.hypot(next.x - raw.x, next.y - raw.y);
-    const n = Math.max(2, Math.ceil(approx));
+    const n = Math.max(2, Math.ceil(dist(raw, mid) + dist(next, raw)));
     let prev = mid;
     for (let i = 1; i <= n; i++) {
       const t = i / n;
@@ -288,16 +287,99 @@ export function startGarden(
         x: u * u * mid.x + 2 * u * t * raw.x + t * t * next.x,
         y: u * u * mid.y + 2 * u * t * raw.y + t * t * next.y,
       };
-      carry += Math.hypot(q.x - prev.x, q.y - prev.y);
+      carry += dist(q, prev);
       if (carry >= STEP) {
-        out.push(q);
+        pathS += lastOut ? dist(q, lastOut) : 0;
+        lastOut = q;
+        held.push({ p: q, s: pathS });
         carry = 0;
       }
       prev = q;
     }
     mid = next;
     raw = p;
-    for (const q of out) pending.push(q);
+  };
+
+  // The latest sample at or before arc length s.
+  const sampleAt = (s: number) => {
+    let found: { p: Pt; s: number } | null = null;
+    for (const h of hist) {
+      if (h.s > s) break;
+      found = h;
+    }
+    return found;
+  };
+
+  // End the stroke at the apex of a sharp turn and start a new one from it.
+  const turn = (apex: Pt, from: Pt, dir: Pt, p: Pt) => {
+    const along = (q: Pt) => (q.x - from.x) * dir.x + (q.y - from.y) * dir.y;
+    const limit = along(apex);
+    // Held points up to the apex finish the stroke; the rest are the hairpin.
+    while (held.length && along(held[0].p) <= limit) rake(held.shift()!.p);
+    held = [];
+    if (lastRaked && dist(apex, lastRaked) > 0.5) {
+      const a = lastRaked;
+      const n = Math.ceil(dist(apex, a) / STEP);
+      for (let i = 1; i <= n; i++) rake({ x: a.x + ((apex.x - a.x) * i) / n, y: a.y + ((apex.y - a.y) * i) / n });
+    }
+    if (pending.length) sand.extendStroke(pending, TINES, SPACING);
+    pending = [];
+    sand.endStroke();
+    begin(apex);
+    hist.push({ p, s: dist(p, apex) });
+    smoothTo(p);
+  };
+
+  const add = (p: Pt) => {
+    if (!raw || !mid) {
+      begin(p);
+      return;
+    }
+    if (dist(p, raw) < MIN_MOVE) return;
+    const last = hist[hist.length - 1];
+    const s = last.s + dist(p, last.p);
+    hist.push({ p, s });
+    while (hist.length > 2 && s - hist[1].s > TURN_NEW + TURN_OLD + 20) hist.shift();
+
+    let turned = false;
+    // The older stretch is measured back from where the newer one starts, so
+    // one long jump between samples can't make both land on the same point.
+    const ha = sampleAt(s - TURN_NEW);
+    const hb = ha && sampleAt(ha.s - TURN_OLD);
+    if (ha && hb) {
+      const a = ha.p;
+      const b = hb.p;
+      const oldLen = dist(a, b);
+      const newLen = dist(p, a);
+      if (oldLen > TURN_OLD * 0.6 && newLen > TURN_NEW * 0.6) {
+        const od = { x: (a.x - b.x) / oldLen, y: (a.y - b.y) / oldLen };
+        const nd = { x: (p.x - a.x) / newLen, y: (p.y - a.y) / newLen };
+        if (od.x * nd.x + od.y * nd.y < CORNER) {
+          let apex = a;
+          let best = -Infinity;
+          for (const h of hist) {
+            const r = (h.p.x - b.x) * od.x + (h.p.y - b.y) * od.y;
+            if (r > best) {
+              best = r;
+              apex = h.p;
+            }
+          }
+          turn(apex, b, od, p);
+          turned = true;
+        }
+      }
+    }
+    if (!turned) {
+      smoothTo(p);
+      commit(pathS - HOLD);
+    }
+
+    // If the pointer stops, rake what's held rather than leave a gap.
+    clearTimeout(idle);
+    idle = window.setTimeout(() => {
+      commit(Infinity);
+      if (!raf) raf = requestAnimationFrame(paint);
+    }, 120);
   };
 
   const onMove = (e: PointerEvent) => {
@@ -333,6 +415,7 @@ export function startGarden(
   return () => {
     cancelAnimationFrame(raf);
     clearTimeout(resizeTimer);
+    clearTimeout(idle);
     removeEventListener("pointermove", onMove);
     removeEventListener("scroll", onLeave);
     removeEventListener("resize", onResize);
