@@ -1,0 +1,41 @@
+{
+ "width": 512,
+ "height": 1465,
+ "rows": [
+  {
+   "name": "sandan-kohaku",
+   "y": 2,
+   "h": 212
+  },
+  {
+   "name": "sanke",
+   "y": 216,
+   "h": 185
+  },
+  {
+   "name": "sanke4",
+   "y": 403,
+   "h": 191
+  },
+  {
+   "name": "goshiki",
+   "y": 596,
+   "h": 207
+  },
+  {
+   "name": "asagi",
+   "y": 805,
+   "h": 227
+  },
+  {
+   "name": "showa",
+   "y": 1034,
+   "h": 214
+  },
+  {
+   "name": "tancho-showa",
+   "y": 1250,
+   "h": 213
+  }
+ ]
+}

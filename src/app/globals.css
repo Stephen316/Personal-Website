@@ -1,0 +1,39 @@
+@import "tailwindcss";
+/* liquid-glass-react styles its layers with Tailwind class names. */
+@source "../../node_modules/liquid-glass-react/dist";
+
+:root {
+  --sand: #e4d5b8;
+  --ink: #2a241c;
+  --muted: #6b5f4d;
+  --moss: #4f6b2a;
+  --card: rgb(248 242 229 / 0.9);
+  --card-line: #d8c8a6;
+  --foam: #f4fbf8;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-sand: var(--sand);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-moss: var(--moss);
+  --color-card: var(--card);
+  --color-card-line: var(--card-line);
+  --color-foam: var(--foam);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-cormorant);
+  --font-signature: var(--font-instrument-serif);
+}
+
+body {
+  background: var(--sand);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+:focus-visible {
+  outline: 2px solid var(--moss);
+  outline-offset: 2px;
+}
