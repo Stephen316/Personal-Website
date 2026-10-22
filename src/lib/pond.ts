@@ -1,4 +1,4 @@
-import { KOI_FLOATS_PER_FISH, makeSchool, schoolBounds, updateSchool, writeKoiMesh, type KoiPhoto } from "./koi";
+import { KOI_FLOATS_PER_FISH, makeSchool, schoolBounds, updateSchool, writeKoiMesh, type KoiKind } from "./koi";
 import { pointer, trackPointer } from "./pointer";
 import { mulberry32 } from "./sand";
 
@@ -317,29 +317,40 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   let school = makeSchool(0, 1, 0, 1, 1, mulberry32(1));
   let seeded = false;
 
-  // The koi photos: one atlas image plus where each fish sits in it. Fish
-  // appear once both have loaded.
-  let photos: KoiPhoto[] = [];
+  // The koi parts: one atlas image plus where each fish's body, tail and fins
+  // sit in it (px rectangles). Fish appear once both have loaded. The atlas is
+  // a power of two so it can be mipmapped: fish are drawn several times
+  // smaller than their parts, which shimmers without mips.
+  let kinds: KoiKind[] = [];
   let atlasReady = false;
   void (async () => {
     try {
-      const res = await fetch("/koi/atlas.json");
-      const meta: { width: number; height: number; rows: { y: number; h: number }[] } = await res.json();
+      type Rect = [number, number, number, number];
+      type Meta = { width: number; height: number; fish: { body: Rect; tail: Rect; pec: Rect; pelvic: Rect }[] };
+      const meta: Meta = await (await fetch("/koi/atlas.json")).json();
       const img = new Image();
       img.src = "/koi/atlas.webp";
       await img.decode();
       gl.activeTexture(gl.TEXTURE3);
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-      photos = meta.rows.map((r) => ({
-        v0: r.y / meta.height,
-        v1: (r.y + r.h) / meta.height,
-        aspect: r.h / meta.width,
-      }));
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      kinds = meta.fish.map((k) => {
+        const part = ([x, y, w, h]: Rect) => ({
+          u0: x / meta.width,
+          v0: y / meta.height,
+          u1: (x + w) / meta.width,
+          v1: (y + h) / meta.height,
+          aspect: h / w,
+          rel: w / k.body[2],
+        });
+        return { body: part(k.body), tail: part(k.tail), pec: part(k.pec), pelvic: part(k.pelvic) };
+      });
       atlasReady = true;
       seeded = false;
     } catch {
-      // Without the photos the pond simply has no fish.
+      // Without the atlas the pond simply has no fish.
     }
   })();
   const ku = uni(koi);
@@ -454,7 +465,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     if (!seeded) {
       const s0 = shore.base() + shore.amp() * 2;
       const size = Math.min(1.3, Math.max(0.65, Math.min(vw, vh) / 850));
-      school = makeSchool(photos.length, vw, s0 + 80, Math.min(top0 + pondH - 80, s0 + vh * 0.8), size, mulberry32(42));
+      school = makeSchool(kinds.length, vw, s0 + 80, Math.min(top0 + pondH - 80, s0 + vh * 0.8), size, mulberry32(42));
       koiVerts = new Float32Array(KOI_FLOATS_PER_FISH * Math.max(1, school.length));
       gl.bindBuffer(gl.ARRAY_BUFFER, koiBuf);
       gl.bufferData(gl.ARRAY_BUFFER, koiVerts.byteLength, gl.DYNAMIC_DRAW);
@@ -485,7 +496,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       if (visible) {
-        const count = writeKoiMesh(school, photos, koiVerts);
+        const count = writeKoiMesh(school, kinds, koiVerts);
         gl.useProgram(koi);
         gl.bindBuffer(gl.ARRAY_BUFFER, koiBuf);
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, koiVerts.subarray(0, count * 4));

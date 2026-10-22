@@ -3,7 +3,8 @@
 // A cursor swept fast over a fish startles it: it flicks round and darts
 // away, nearby fish panic with it, and after staying wary for a few seconds
 // each one drifts back on its own.
-// They're drawn from real photographs (see public/koi), bent along the spine.
+// Each is assembled from sprite parts (see public/koi): the body bends along
+// the spine, the tail fin flexes behind it, and the fins stay rigid.
 
 type P = { x: number; y: number };
 
@@ -13,7 +14,7 @@ export type Koi = {
   speed: number;
   seg: number;
   width: number; // body width, used for spacing and the shore margin
-  photo: number; // row in the koi atlas
+  kind: number; // row in the koi atlas
   phase: number;
   orbit: number;
   orbitR: number;
@@ -25,7 +26,7 @@ export type Koi = {
 const SEGMENTS = 14;
 
 // Fish live in page coordinates, so they scroll with the pond. y0..y1 is the
-// band they start in; one fish per photo.
+// band they start in; one fish per kind in the atlas.
 export function makeSchool(count: number, w: number, y0: number, y1: number, scale: number, rand: () => number): Koi[] {
   return Array.from({ length: count }, (_, i) => {
     const len = (115 + rand() * 45) * scale;
@@ -39,7 +40,7 @@ export function makeSchool(count: number, w: number, y0: number, y1: number, sca
       speed: 40,
       seg,
       width: len * 0.24,
-      photo: i,
+      kind: i,
       phase: rand() * 10,
       orbit: (i / count) * Math.PI * 2,
       orbitR: (50 + rand() * 70) * scale,
@@ -213,22 +214,40 @@ export function schoolBounds(school: Koi[]) {
 }
 
 // ---------------------------------------------------------------------------
-// The 2D rig. Each photo is a straightened koi, nose at the left and tail fin
-// at the right, laid along the spine as a strip of quads. The part of the
-// photo behind the tail base (the tail fin) continues as a short chain that
-// lags the body's wave, so the fin flexes. Vertices are page px plus atlas UVs,
-// written as plain triangles.
+// The 2D rig. Each koi is a set of parts cut from one sprite sheet: a body,
+// nose at the left, laid along the spine as a strip of quads only as wide as
+// the body, so it bends without folding over; a tail fin continuing from the
+// tail base as a short chain that lags the body's wave, so it flexes; and
+// rigid pectoral and pelvic fins pinned to the body's sides, mirrored for the
+// far side, that paddle a little and fold back when the fish bolts. Fins and
+// tail go down first so the body covers their roots. Vertices are page px
+// plus atlas UVs, written as plain triangles.
 
-// Where the tail fin begins along each photo, as a fraction of its length.
-const TAIL_START = 0.8;
 const BODY_SEGS = 20;
 const TAIL_SEGS = 6;
-export const KOI_FLOATS_PER_FISH = (BODY_SEGS + TAIL_SEGS) * 6 * 4;
+const FINS = 4;
+export const KOI_FLOATS_PER_FISH = (BODY_SEGS + TAIL_SEGS + FINS) * 6 * 4;
 
-// A photo's place in the atlas (UV space) and its height/length ratio.
-export type KoiPhoto = { v0: number; v1: number; aspect: number };
+// The tail fin's root is a stub of peduncle: its first TAIL_TUCK (of the fin's
+// length) tucks under the body, and the stub, a little taller than the body's
+// tail base on the sheets, narrows to TAIL_ROOT of the fin's height there,
+// widening to full by TAIL_FLARE.
+const TAIL_TUCK = 0.1;
+const TAIL_ROOT = 0.69;
+const TAIL_FLARE = 0.25;
 
-export function writeKoiMesh(school: Koi[], photos: KoiPhoto[], out: Float32Array) {
+// Where each fin pair is pinned: distance from the nose as a share of the
+// body, how far out toward the body's edge, and the angle out from straight
+// back (radians).
+const PEC = { at: 0.24, out: 0.72, angle: 0.85 };
+const PELVIC = { at: 0.5, out: 0.78, angle: 0.5 };
+
+// One part's place in the atlas (UV space): its height/length ratio, and its
+// length relative to the body's (every part is cut at the same scale).
+export type KoiPart = { u0: number; v0: number; u1: number; v1: number; aspect: number; rel: number };
+export type KoiKind = { body: KoiPart; tail: KoiPart; pec: KoiPart; pelvic: KoiPart };
+
+export function writeKoiMesh(school: Koi[], kinds: KoiKind[], out: Float32Array) {
   let o = 0;
   const put = (x: number, y: number, u: number, v: number) => {
     out[o++] = x;
@@ -236,28 +255,21 @@ export function writeKoiMesh(school: Koi[], photos: KoiPhoto[], out: Float32Arra
     out[o++] = u;
     out[o++] = v;
   };
-  // A strip section from (a, u0) to (b, u1), each end with its own normal.
-  const section = (a: P, na: P, u0: number, b: P, nb: P, u1: number, half: number, ph: KoiPhoto) => {
-    const a0 = [a.x - na.x * half, a.y - na.y * half];
-    const a1 = [a.x + na.x * half, a.y + na.y * half];
-    const b0 = [b.x - nb.x * half, b.y - nb.y * half];
-    const b1 = [b.x + nb.x * half, b.y + nb.y * half];
-    put(a0[0], a0[1], u0, ph.v0);
-    put(b0[0], b0[1], u1, ph.v0);
-    put(a1[0], a1[1], u0, ph.v1);
-    put(b0[0], b0[1], u1, ph.v0);
-    put(b1[0], b1[1], u1, ph.v1);
-    put(a1[0], a1[1], u0, ph.v1);
+  // A quad from the (a0, a1) end at u0 to the (b0, b1) end at u1; the 0 corners
+  // take the part's top row, the 1 corners its bottom.
+  const quad = (a0: P, a1: P, u0: number, b0: P, b1: P, u1: number, r: KoiPart) => {
+    put(a0.x, a0.y, u0, r.v0);
+    put(b0.x, b0.y, u1, r.v0);
+    put(a1.x, a1.y, u0, r.v1);
+    put(b0.x, b0.y, u1, r.v0);
+    put(b1.x, b1.y, u1, r.v1);
+    put(a1.x, a1.y, u0, r.v1);
   };
+  const off = (p: P, n: P, k: number) => ({ x: p.x + n.x * k, y: p.y + n.y * k });
 
   for (const f of school) {
-    const ph = photos[f.photo % photos.length];
+    const kind = kinds[f.kind % kinds.length];
     const fr = frames(f);
-    // The spine is the body, nose to tail base; the whole photo is longer by
-    // its tail fin.
-    const bodyLen = f.seg * (fr.length - 1);
-    const total = bodyLen / TAIL_START;
-    const half = (total * ph.aspect) / 2;
 
     // Render spine. The head of a koi is rigid and the bend happens behind
     // the pectoral fins, so the front third is pulled toward a straight line
@@ -280,11 +292,12 @@ export function writeKoiMesh(school: Koi[], photos: KoiPhoto[], out: Float32Arra
         };
       }
     }
-    const snout = total * 0.02;
+    const snout = f.seg * (n - 1) * 0.02;
     spine.unshift({ x: head.x + head.tx * snout, y: head.y + head.ty * snout });
     const cum = [0];
     for (let i = 1; i < spine.length; i++) cum.push(cum[i - 1] + Math.hypot(spine[i].x - spine[i - 1].x, spine[i].y - spine[i - 1].y));
     const len = cum[cum.length - 1];
+    // The point d along the spine, its normal, and the way back toward the tail.
     const at = (d: number) => {
       let i = 1;
       while (i < spine.length - 1 && cum[i] < d) i++;
@@ -292,17 +305,68 @@ export function writeKoiMesh(school: Koi[], photos: KoiPhoto[], out: Float32Arra
       const b = spine[i];
       const seg = cum[i] - cum[i - 1] || 1;
       const k = Math.max(0, Math.min(1, (d - cum[i - 1]) / seg));
-      const tx = (a.x - b.x) / seg;
-      const ty = (a.y - b.y) / seg;
-      return { p: { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }, n: { x: -ty, y: tx } };
+      const bx = (b.x - a.x) / seg;
+      const by = (b.y - a.y) / seg;
+      return { p: { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }, n: { x: by, y: -bx }, back: { x: bx, y: by } };
     };
+    const half = (len * kind.body.aspect) / 2;
 
-    // Edge points either side of the spine. On the inside of a bend an edge
-    // can run backwards (the strip folds over itself); where it would, that
-    // edge point is pulled in toward the spine until it moves forward again.
+    // Fins, rigid, each pinned inside the body's edge so the body covers its
+    // root. The near and far fins mirror each other: each fin's top row faces
+    // the head.
+    const fin = (r: KoiPart, spot: { at: number; out: number; angle: number }, side: number, swing: number) => {
+      const s = at(len * spot.at);
+      const root = off(s.p, s.n, side * half * spot.out);
+      const a = spot.angle + swing;
+      const d = { x: s.back.x * Math.cos(a) + s.n.x * side * Math.sin(a), y: s.back.y * Math.cos(a) + s.n.y * side * Math.sin(a) };
+      let m = { x: -d.y, y: d.x };
+      if (m.x * s.back.x + m.y * s.back.y > 0) m = { x: -m.x, y: -m.y };
+      const l = len * r.rel;
+      const w = (l * r.aspect) / 2;
+      const tip = off(root, d, l);
+      quad(off(root, m, w), off(root, m, -w), r.u0, off(tip, m, w), off(tip, m, -w), r.u1, r);
+    };
+    // A bolting fish folds its fins back; otherwise they paddle slowly.
+    const fold = 1 - 0.55 * Math.min(1, f.fear);
+    for (const side of [-1, 1]) {
+      fin(kind.pelvic, PELVIC, side, (Math.sin(f.phase * 0.4 + side) * 0.12 - PELVIC.angle * (1 - fold)));
+      fin(kind.pec, PEC, side, (Math.sin(f.phase * 0.45 + side * 0.7) * 0.2 - PEC.angle * (1 - fold)));
+    }
+
+    // Tail fin: a chain from just inside the tail base, lagging the wave.
+    const tr = kind.tail;
+    const tailLen = len * tr.rel;
+    const base = at(len - tailLen * TAIL_TUCK);
+    let ang = Math.atan2(base.back.y, base.back.x);
+    const sweep = Math.sin(f.phase - 4.6) * 0.5;
+    const step = tailLen / TAIL_SEGS;
+    const tailHalf = (tailLen * tr.aspect) / 2;
+    const width = (u: number) => {
+      const k = Math.min(1, u / TAIL_FLARE);
+      return tailHalf * (TAIL_ROOT + (1 - TAIL_ROOT) * k * k * (3 - 2 * k));
+    };
+    let p = base.p;
+    for (let k = 0; k < TAIL_SEGS; k++) {
+      const n0 = { x: Math.sin(ang), y: -Math.cos(ang) };
+      ang += (sweep / TAIL_SEGS) * (1 + k * 0.3);
+      const q = { x: p.x + Math.cos(ang) * step, y: p.y + Math.sin(ang) * step };
+      const n1 = { x: Math.sin(ang), y: -Math.cos(ang) };
+      const t0 = k / TAIL_SEGS;
+      const t1 = (k + 1) / TAIL_SEGS;
+      const h0 = width(t0);
+      const h1 = width(t1);
+      quad(off(p, n0, h0), off(p, n0, -h0), tr.u0 + (tr.u1 - tr.u0) * t0, off(q, n1, h1), off(q, n1, -h1), tr.u0 + (tr.u1 - tr.u0) * t1, tr);
+      p = q;
+    }
+
+    // Body. On the inside of a tight bend an edge could still run backwards
+    // (the strip folding over itself); where it would, that edge point is
+    // pulled in toward the spine until it moves forward again. The strip is
+    // only body-wide, so this is rare.
+    const br = kind.body;
     const samples = Array.from({ length: BODY_SEGS + 1 }, (_, i) => at((i / BODY_SEGS) * len));
     const edge = (side: number) => {
-      const pts = samples.map((s) => ({ x: s.p.x + s.n.x * half * side, y: s.p.y + s.n.y * half * side }));
+      const pts = samples.map((s) => off(s.p, s.n, half * side));
       for (let i = 1; i < pts.length; i++) {
         const sx = samples[i].p.x - samples[i - 1].p.x;
         const sy = samples[i].p.y - samples[i - 1].p.y;
@@ -310,42 +374,18 @@ export function writeKoiMesh(school: Koi[], photos: KoiPhoto[], out: Float32Arra
           const ex = pts[i].x - pts[i - 1].x;
           const ey = pts[i].y - pts[i - 1].y;
           if (ex * sx + ey * sy > 0.15 * (sx * sx + sy * sy)) break;
-          pts[i] = { x: samples[i].p.x + samples[i].n.x * half * side * k, y: samples[i].p.y + samples[i].n.y * half * side * k };
+          pts[i] = off(samples[i].p, samples[i].n, half * side * k);
         }
       }
       return pts;
     };
-    const lo = edge(-1);
-    const hi = edge(1);
+    // n points to the sheet's top edge when the fish lies as drawn (nose left).
+    const top = edge(1);
+    const bottom = edge(-1);
     for (let i = 0; i < BODY_SEGS; i++) {
-      const u0 = (i / BODY_SEGS) * TAIL_START;
-      const u1 = ((i + 1) / BODY_SEGS) * TAIL_START;
-      put(lo[i].x, lo[i].y, u0, ph.v0);
-      put(lo[i + 1].x, lo[i + 1].y, u1, ph.v0);
-      put(hi[i].x, hi[i].y, u0, ph.v1);
-      put(lo[i + 1].x, lo[i + 1].y, u1, ph.v0);
-      put(hi[i + 1].x, hi[i + 1].y, u1, ph.v1);
-      put(hi[i].x, hi[i].y, u0, ph.v1);
-    }
-
-    // Tail fin: a chain continuing from the tail base, lagging the wave.
-    const tail = spine[spine.length - 1];
-    const before = spine[spine.length - 2];
-    let ang = Math.atan2(tail.y - before.y, tail.x - before.x);
-    const sweep = Math.sin(f.phase - 4.6) * 0.5;
-    const step = (total * (1 - TAIL_START)) / TAIL_SEGS;
-    let p = { x: tail.x, y: tail.y };
-    for (let k = 0; k < TAIL_SEGS; k++) {
-      const n0 = { x: -Math.sin(ang), y: Math.cos(ang) };
-      ang += (sweep / TAIL_SEGS) * (1 + k * 0.3);
-      const q = { x: p.x + Math.cos(ang) * step, y: p.y + Math.sin(ang) * step };
-      const n1 = { x: -Math.sin(ang), y: Math.cos(ang) };
-      const u0 = TAIL_START + (k / TAIL_SEGS) * (1 - TAIL_START);
-      const u1 = TAIL_START + ((k + 1) / TAIL_SEGS) * (1 - TAIL_START);
-      // Normals here point the other way round (the chain runs backwards),
-      // so swap them to keep the photo's sides on the same sides.
-      section(p, { x: -n0.x, y: -n0.y }, u0, q, { x: -n1.x, y: -n1.y }, u1, half, ph);
-      p = q;
+      const u0 = br.u0 + ((br.u1 - br.u0) * i) / BODY_SEGS;
+      const u1 = br.u0 + ((br.u1 - br.u0) * (i + 1)) / BODY_SEGS;
+      quad(top[i], bottom[i], u0, top[i + 1], bottom[i + 1], u1, br);
     }
   }
   return o / 4;

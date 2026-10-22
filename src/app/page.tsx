@@ -1,7 +1,6 @@
 import { GlassCard } from "@/components/GlassCard";
 import { Scene } from "@/components/Scene";
 import { projects, site } from "@/content/site";
-import koiCredits from "../../public/koi/credits.json";
 
 export default function Home() {
   return (
@@ -59,29 +58,10 @@ export default function Home() {
           </section>
         </main>
 
-        <footer className="flex flex-col gap-2 py-6 text-sm text-foam/80">
+        <footer className="flex h-16 items-center text-sm text-foam/80">
           <a href={site.github} target="_blank" rel="noreferrer" className="transition-colors hover:text-foam">
             github.com/Stephen316
           </a>
-          {/* The koi are cut from these Wikimedia Commons photos; their licences
-              require credit, and the cut-outs share the same licence. */}
-          <p className="text-xs text-foam/60">
-            Koi photos:{" "}
-            {koiCredits.map((c, i) => (
-              <span key={c.name}>
-                {i > 0 && ", "}
-                <a href={c.page} target="_blank" rel="noreferrer" className="underline decoration-foam/30 underline-offset-2 hover:text-foam">
-                  {c.artist}
-                </a>{" "}
-                (
-                <a href={c.licenseUrl} target="_blank" rel="noreferrer" className="hover:text-foam">
-                  {c.license}
-                </a>
-                )
-              </span>
-            ))}
-            , via Wikimedia Commons; cut out and straightened.
-          </p>
         </footer>
       </div>
     </>
