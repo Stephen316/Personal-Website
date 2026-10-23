@@ -10,7 +10,7 @@ export type Project = {
 export const site = {
   name: "Stephen Harcourt",
   // TODO: rewrite in your own words.
-  intro: "I build apps and tools, mostly for problems I have myself.",
+  intro: "I build apps and tools, most of the time it's because I'm bored.",
   github: "https://github.com/Stephen316",
 };
 

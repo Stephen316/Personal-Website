@@ -31,11 +31,14 @@ function layoutStones(w: number, vh: number, textRight: number): (Stone & { img:
     img,
     aspect: STONE_IMAGES[img].aspect,
   });
-  const big = at(w * 0.76, vh * 0.34, 110 * s + 18, 0);
+  // Beside the title: placed and sized as in the design (Figma, "Home —
+  // Desktop", 1440 x 900), the big stone up right and the small one below the
+  // hint. Centred on where each boulder's outline sits there, not its image box.
+  const big = at(w * 0.772, vh * 0.494, 110 * s + 18, 0);
   const shift = Math.max(0, textRight + 12 + ripples(big) - big.x);
   if (big.x + shift + big.r * 1.12 + SPACING <= w) {
     const placed = { ...big, x: big.x + shift };
-    return [placed, apart(placed, at(w * 0.64 + shift, vh * 0.7, 66 * s + 15, 1))];
+    return [placed, apart(placed, at(w * 0.396 + shift, vh * 0.781, 66 * s + 15, 1))];
   }
   const top = at(w * 0.62, vh * 0.16, 54 * s + 22, 0);
   return [top, apart(top, at(w * 0.36, vh * 0.86, 42 * s + 18, 1))];
