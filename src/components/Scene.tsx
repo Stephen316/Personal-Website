@@ -1,34 +1,45 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { startGarden } from "@/lib/garden";
 import { startPond } from "@/lib/pond";
+import { placePiece, SHORE_PIECES, SHORE_RIPPLES, shoreAt, type ShorePiece } from "@/lib/shoreline";
 
 // The page background: the zen garden's sand on top of a koi pond. Both are
 // ordinary absolutely positioned layers in the page, so the browser scrolls
-// them with the content: the sand ends in a hard, curved shoreline and the
-// pond canvas runs from just above it to the bottom of the page.
+// them with the content: the sand ends in a hard, curved shoreline, edged
+// with moss and boulders, and the pond canvas runs from just above it to the
+// bottom of the page.
 export function Scene() {
   const sandLayer = useRef<HTMLDivElement>(null);
   const sand = useRef<HTMLCanvasElement>(null);
   const stones = useRef<HTMLCanvasElement>(null);
   const floor = useRef<HTMLCanvasElement>(null);
+  const veil = useRef<HTMLDivElement>(null);
+  const shoreLayer = useRef<HTMLDivElement>(null);
+  const ripples = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!sandLayer.current || !sand.current || !stones.current || !floor.current) return;
+    if (!sandLayer.current || !sand.current || !stones.current || !floor.current || !veil.current || !shoreLayer.current || !ripples.current) return;
     const layer = sandLayer.current;
     const sandCanvas = sand.current;
     const stoneCanvas = stones.current;
     const pondCanvas = floor.current;
+    const pondVeil = veil.current;
+    const edge = shoreLayer.current;
+    const shoreRipples = ripples.current;
 
-    // Sand covers the first screen and a bit more; the shoreline wave sits
-    // in that extra margin, so it never cuts through the hero or the stones.
     let w = 0;
     let h = 0;
     let amp = 0;
-    const shore = (x: number) => {
-      const u = x / w;
-      return h - amp * 1.15 + amp * (Math.sin(u * Math.PI * 2.2 + 0.8) * 0.7 + Math.sin(u * Math.PI * 4.6 + 2.1) * 0.3);
+    const shore = (x: number) => shoreAt(x, w, innerHeight);
+    const place = (el: HTMLElement, p: ShorePiece) => {
+      const r = placePiece(p, w, innerHeight);
+      el.style.left = `${r.left}px`;
+      el.style.top = `${r.top}px`;
+      el.style.width = `${r.width}px`;
+      el.style.height = `${r.height}px`;
+      return r.top + r.height;
     };
     const layout = () => {
       w = innerWidth;
@@ -41,6 +52,13 @@ export function Scene() {
         pts.push(`${x.toFixed(1)}px ${shore(x).toFixed(1)}px`);
       }
       layer.style.clipPath = `polygon(${pts.join(",")})`;
+      place(shoreRipples, SHORE_RIPPLES);
+      // The edge layer clips the pieces hanging off the sides, and their
+      // shadows scale with them.
+      let bottom = 0;
+      SHORE_PIECES.forEach((p, i) => (bottom = Math.max(bottom, place(edge.children[i] as HTMLElement, p))));
+      edge.style.height = `${Math.ceil(bottom)}px`;
+      edge.style.setProperty("--s", String(w / 1440));
     };
     // The h1 is a full-width block, so measure its text, not the element.
     const titleRight = () => {
@@ -62,7 +80,7 @@ export function Scene() {
       layout();
       addEventListener("resize", layout);
       stopGarden = startGarden(sandCanvas, stoneCanvas, () => ({ w, h }), (x, y) => y < shore(x) - 4, titleRight);
-      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced);
+      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced, pondVeil);
     };
     start();
     if (!started) addEventListener("resize", start);
@@ -82,10 +100,59 @@ export function Scene() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 -z-20 w-full bg-[#0a666a]"
       />
+      {/* The pond seen out of focus: a 3px backdrop blur over the canvas, under the cards. */}
+      <div ref={veil} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-20 backdrop-blur-[3px]" />
       <div ref={sandLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[130vh] [&>canvas]:blur-[0.4px]">
         <canvas ref={sand} className="absolute inset-0 h-full w-full" />
+        <div ref={ripples} className="absolute">
+          <ShoreImage piece={SHORE_RIPPLES} />
+        </div>
         <canvas ref={stones} className="absolute inset-0 h-full w-full" />
       </div>
+      <div ref={shoreLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-[5] overflow-hidden">
+        {SHORE_PIECES.map((p, i) => (
+          <div key={i} className="absolute">
+            <ShoreImage piece={p} />
+          </div>
+        ))}
+      </div>
     </>
+  );
+}
+
+// Figma's shadows on these cut-outs follow their outlines, which is
+// drop-shadow, not box-shadow; lengths are in design px, scaled by --s.
+const SHADOWS = {
+  rock: "drop-shadow(calc(-3px * var(--s)) calc(4px * var(--s)) calc(5px * var(--s)) rgb(19 22 9 / 0.78)) drop-shadow(calc(5px * var(--s)) calc(9px * var(--s)) calc(13px * var(--s)) rgb(33 29 17 / 0.38))",
+  moss: "drop-shadow(calc(1px * var(--s)) calc(2px * var(--s)) calc(3px * var(--s)) rgb(48 43 20 / 0.23))",
+};
+
+// A design image inside its placed bounding box: its own box centred in that,
+// turned, and filled as the design fills it.
+function ShoreImage({ piece }: { piece: ShorePiece }) {
+  const [, , bw, bh] = piece.box;
+  const [iw, ih] = piece.inner ?? [bw, bh];
+  const frame: CSSProperties = {
+    position: "absolute",
+    left: `${((bw - iw) / 2 / bw) * 100}%`,
+    top: `${((bh - ih) / 2 / bh) * 100}%`,
+    width: `${(iw / bw) * 100}%`,
+    height: `${(ih / bh) * 100}%`,
+    transform: piece.rotate ? `rotate(${piece.rotate}deg)` : undefined,
+    filter: piece.shadow ? SHADOWS[piece.shadow] : undefined,
+  };
+  const fit = piece.fit;
+  return (
+    <div style={frame}>
+      {typeof fit === "string" ? (
+        // eslint-disable-next-line @next/next/no-img-element -- placed and cropped by hand to match the design
+        <img src={piece.src} alt="" draggable={false} decoding="async" className="absolute inset-0 size-full max-w-none" style={{ objectFit: fit }} />
+      ) : (
+        <div className="absolute inset-0 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element -- placed and cropped by hand to match the design */}
+          <img src={piece.src} alt="" draggable={false} decoding="async" className="absolute w-full max-w-none" style={{ height: `${fit.h}%`, top: `${fit.top}%`, left: `${fit.left}%` }} />
+        </div>
+      )}
+    </div>
   );
 }
