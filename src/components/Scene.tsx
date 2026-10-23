@@ -15,17 +15,19 @@ export function Scene() {
   const sand = useRef<HTMLCanvasElement>(null);
   const stones = useRef<HTMLCanvasElement>(null);
   const floor = useRef<HTMLCanvasElement>(null);
-  const veil = useRef<HTMLDivElement>(null);
   const shoreLayer = useRef<HTMLDivElement>(null);
+  const overLayer = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!sandLayer.current || !sand.current || !stones.current || !floor.current || !veil.current || !shoreLayer.current) return;
+    if (!sandLayer.current || !sand.current || !stones.current || !floor.current || !shoreLayer.current || !overLayer.current) return;
     const layer = sandLayer.current;
     const sandCanvas = sand.current;
     const stoneCanvas = stones.current;
     const pondCanvas = floor.current;
-    const pondVeil = veil.current;
-    const edge = shoreLayer.current;
+    const edges: [HTMLElement, ShorePiece[]][] = [
+      [shoreLayer.current, UNDER],
+      [overLayer.current, OVER],
+    ];
 
     let w = 0;
     let h = 0;
@@ -50,12 +52,14 @@ export function Scene() {
         pts.push(`${x.toFixed(1)}px ${shore(x).toFixed(1)}px`);
       }
       layer.style.clipPath = `polygon(${pts.join(",")})`;
-      // The edge layer clips the pieces hanging off the sides, and their
+      // The edge layers clip the pieces hanging off the sides, and their
       // shadows scale with them.
-      let bottom = 0;
-      SHORE_PIECES.forEach((p, i) => (bottom = Math.max(bottom, place(edge.children[i] as HTMLElement, p))));
-      edge.style.height = `${Math.ceil(bottom)}px`;
-      edge.style.setProperty("--s", String(w / 1440));
+      for (const [edge, pieces] of edges) {
+        let bottom = 0;
+        pieces.forEach((p, i) => (bottom = Math.max(bottom, place(edge.children[i] as HTMLElement, p))));
+        edge.style.height = `${Math.ceil(bottom)}px`;
+        edge.style.setProperty("--s", String(w / 1440));
+      }
     };
     // The h1 is a full-width block, so measure its text, not the element.
     const titleRight = () => {
@@ -80,7 +84,7 @@ export function Scene() {
         at: shore,
         grooves: (x) => groovesTop(x, w, innerHeight),
       });
-      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced, pondVeil);
+      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced);
     };
     start();
     if (!started) addEventListener("resize", start);
@@ -100,14 +104,20 @@ export function Scene() {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 -z-20 w-full bg-[#0a666a]"
       />
-      {/* The pond seen out of focus: a 3px backdrop blur over the canvas, under the cards. */}
-      <div ref={veil} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-20 backdrop-blur-[3px]" />
       <div ref={sandLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[130vh] [&>canvas]:blur-[0.4px]">
         <canvas ref={sand} className="absolute inset-0 h-full w-full" />
         <canvas ref={stones} className="absolute inset-0 h-full w-full" />
       </div>
       <div ref={shoreLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-[5] overflow-hidden">
-        {SHORE_PIECES.map((p, i) => (
+        {UNDER.map((p, i) => (
+          <div key={i} className="absolute">
+            <ShoreImage piece={p} />
+          </div>
+        ))}
+      </div>
+      {/* In the design one boulder is the topmost layer, over the text. */}
+      <div ref={overLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-10 overflow-hidden">
+        {OVER.map((p, i) => (
           <div key={i} className="absolute">
             <ShoreImage piece={p} />
           </div>
@@ -116,6 +126,9 @@ export function Scene() {
     </>
   );
 }
+
+const UNDER = SHORE_PIECES.filter((p) => !p.overContent);
+const OVER = SHORE_PIECES.filter((p) => p.overContent);
 
 // Figma's shadows on these cut-outs follow their outlines, which is
 // drop-shadow, not box-shadow; lengths are in design px, scaled by --s.

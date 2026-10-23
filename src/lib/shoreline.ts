@@ -25,6 +25,7 @@ export type ShorePiece = {
   rotate?: number;
   fit: "cover" | "contain" | { h: number; top: number; left: number };
   shadow?: "rock" | "moss";
+  overContent?: boolean; // layered above the page's text, as in the design
 };
 
 // Where the grooves raked along the shore begin, in design px above the
@@ -64,7 +65,7 @@ export const SHORE_PIECES: ShorePiece[] = [
   { src: "/shore/shore-boulder-c.webp", box: [578, 793, 510.708, 444.883], inner: [436.664, 343.573], rotate: 15, fit: "cover", shadow: "rock" },
   { src: "/shore/shore-boulder-d.webp", box: [971, 881, 332.721, 331.217], inner: [272.115, 269.988], rotate: 15, fit: { h: 100.79, top: -1.04, left: 0 }, shadow: "rock" },
   { src: "/shore/shore-boulder-e.webp", box: [1185.71, 892.55, 451.318, 424.821], inner: [363.952, 319.618], rotate: -20, fit: { h: 113.87, top: -1.73, left: 0 }, shadow: "rock" },
-  { src: "/shore/shore-boulder-f.webp", box: [345, 922, 370.008, 312.952], inner: [329.941, 259.602], rotate: -10, fit: "cover", shadow: "rock" },
+  { src: "/shore/shore-boulder-f.webp", box: [345, 922, 370.008, 312.952], inner: [329.941, 259.602], rotate: -10, fit: "cover", shadow: "rock", overContent: true },
 ];
 
 // Where a piece goes on a page w x vh: scaled with the width, and pinned to
