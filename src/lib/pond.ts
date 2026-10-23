@@ -266,11 +266,13 @@ void main() {
   float avg = (texture2D(uState, uv - dx).r + texture2D(uState, uv + dx).r + texture2D(uState, uv - dy).r + texture2D(uState, uv + dy).r) * 0.25;
   // Waves cross ~0.35 texel a step, half Evan's speed: at his, a ripple moved
   // a third of its own length per frame and its thin caustic lines strobed.
-  s.g = (s.g + (avg - s.r) * 0.5) * 0.995;
+  s.g = (s.g + (avg - s.r) * 0.5) * 0.997;
   // A slow leak back to level, so drops can't raise the whole pond, and a
   // little viscosity: the finest ripples die first, as on real water, and
-  // texel-sized ones would only alias in the caustic grid.
-  s.r = mix(s.r + s.g, avg, 0.1) * 0.999;
+  // texel-sized ones would only alias in the caustic grid. Per second, a
+  // 4-texel ripple keeps ~15%, an 8-texel one ~40%, so a wake shows for a
+  // few seconds; at 0.1 viscosity and 0.995 it was gone in one.
+  s.r = mix(s.r + s.g, avg, 0.03) * 0.999;
   for (int i = 0; i < 16; i++) {
     vec4 d = uDrops[i];
     float k = max(0.0, 1.0 - length(c - d.xy) / max(d.z, 0.001));
@@ -978,8 +980,10 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       gridCount = index.length;
     }
 
-    if (sim) {
-      // Fresh, level water: ripples don't survive a relayout.
+    // The sim's size depends on the page, not on quality, so a quality step
+    // (a relayout every second or so on a slow or throttled frame rate) keeps
+    // the ripples; only a new page size starts with fresh, level water.
+    if (sim && (Math.ceil(vw / SIM_PX) !== simW || Math.ceil(bandH / SIM_PX) !== simH || !slopeFb)) {
       simW = Math.ceil(vw / SIM_PX);
       simH = Math.ceil(bandH / SIM_PX);
       for (let i = 0; i < 2; i++) {
