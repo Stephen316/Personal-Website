@@ -321,13 +321,13 @@ uniform float uOrigin;   // page y of the canvas's top row
 uniform vec3 uBand;      // page width, page y and height of the band buffers
 uniform vec4 uLight;     // caustic texel to light, ambient, sun, mean light
 uniform sampler2D uCaustics;
-uniform sampler2D uFish;
 ${SURFACE}
 
-// Fish and caustics live in band-sized buffers; p is a page position.
+// The caustics live in a band-sized buffer; p is a page position.
 vec2 band(vec2 p) { return vec2(p.x / uBand.x, (p.y - uBand.y) / uBand.z); }
-vec4 fish(vec2 p) { return texture2D(uFish, band(p)); }
 
+// The pond layer alone, as in the design: floor, light and the glass. The
+// koi are a layer of their own over it, after the bloom and the blur.
 void main() {
   vec2 w = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uScale + vec2(0.0, uOrigin);
   float t = uTime;
@@ -337,11 +337,7 @@ void main() {
   vec2 gLip = lipSlope(w);
   vec2 wave = waveOffset(w, t);
   vec2 grad = gSwell + gLip - wave / LENS;
-  vec2 off = -gSwell * LENS - gLip * 260.0 + wave;
-  vec2 fw = w + off;
-  // Fish are near the surface, so the glass bends them much less than the
-  // floor beneath them.
-  vec2 fcss = w + off * 0.3;
+  vec2 fw = w - gSwell * LENS - gLip * 260.0 + wave;
 
   // Floor: weathered plaster with algae, lit by turquoise ambient light and
   // the caustic filaments.
@@ -353,28 +349,7 @@ void main() {
   albedo = mix(albedo, vec3(0.36, 0.5, 0.28), algae * 0.75);
   vec3 water = mix(vec3(0.02, 0.66, 0.78), vec3(0.07, 0.9, 0.98), smoothstep(0.42, 0.72, n2.a));
   float light = texture2D(uCaustics, band(fw)).r * uLight.x;
-
-  // Koi shadows: the fish layer's alpha, offset and blurred on the GPU.
-  vec2 so = fcss - SUN;
-  float sh = fish(so).a * 0.2;
-  sh += (fish(so + vec2(7.0, 0.0)).a + fish(so - vec2(7.0, 0.0)).a) * 0.1;
-  sh += (fish(so + vec2(0.0, 7.0)).a + fish(so - vec2(0.0, 7.0)).a) * 0.1;
-  sh += (fish(so + vec2(5.0, 5.0)).a + fish(so - vec2(5.0, 5.0)).a) * 0.1;
-  sh += (fish(so + vec2(5.0, -5.0)).a + fish(so - vec2(5.0, -5.0)).a) * 0.1;
-  // A koi blocks the sun, not the sky: its shadow cuts the light web and
-  // only dims the ambient a little.
-  vec3 floorCol = albedo * (water * uLight.y * (1.0 - sh * 0.3) + vec3(0.68, 1.0, 1.05) * light * uLight.z * (1.0 - sh * 0.9));
-
-  // Koi, seen through the same glass: refracted, colour-fringed, softened,
-  // cooled by the water and dappled by the caustics.
-  vec2 ca = off * 0.012 + vec2(0.3, 0.0);
-  vec4 fg = (fish(fcss) * 2.0 + fish(fcss + vec2(1.0, 0.0)) + fish(fcss - vec2(1.0, 0.0)) + fish(fcss + vec2(0.0, 1.0)) + fish(fcss - vec2(0.0, 1.0))) / 6.0;
-  vec3 f = vec3(fish(fcss + ca).r, fg.g, fish(fcss - ca).b);
-  // Near the surface the light hasn't focused yet: the koi see a weak copy
-  // of the floor's web.
-  f *= vec3(0.84, 0.97, 0.96) * (0.66 + 0.3 * mix(1.0, min(light, 4.0) / uLight.w, 0.35));
-  f = mix(f, floorCol * fg.a, 0.14);
-  vec3 col = floorCol * (1.0 - fg.a) + f;
+  vec3 col = albedo * (water * uLight.y + vec3(0.68, 1.0, 1.05) * light * uLight.z);
 
   // Filmic response: highlights roll off instead of clipping flat.
   col = vec3(1.0) - exp(-col * 1.3);
@@ -419,36 +394,110 @@ void main() {
   gl_FragColor = vec4(c * bright * spot, 1.0);
 }`;
 
-// One direction of a Gaussian (sigma 6 taps of uStep), also used to halve.
+// One direction of a Gaussian, sigma uSigma taps of uStep (up to 12 taps
+// each way). Blurs the glow, halves it, and blurs the pond across.
 const BLOOM_BLUR = `
 precision mediump float;
 uniform sampler2D uSrc;
 uniform vec2 uSize;      // this target, texels
 uniform vec2 uStep;      // one tap, in the source's uv
+uniform float uSigma;
 void main() {
   vec2 uv = gl_FragCoord.xy / uSize;
   vec3 s = vec3(0.0);
   float n = 0.0;
   for (int i = -12; i <= 12; i++) {
     float f = float(i);
-    float k = exp(-f * f / 72.0);
+    float k = exp(-f * f / (2.0 * uSigma * uSigma));
     s += texture2D(uSrc, uv + uStep * f).rgb * k;
     n += k;
   }
   gl_FragColor = vec4(s / n, 1.0);
 }`;
 
-// The scene onto the page canvas, texel for texel, with the glow added.
+// The pond onto the page canvas, texel for texel: the design's "Pond blur"
+// down (the scene comes in already blurred across), with the glow added
+// first, as Pond (with its Bloom) sits under Pond blur there.
 const BLOOM_FINAL = `
 precision mediump float;
 uniform sampler2D uScene;
 uniform sampler2D uNear;   // glow blurred ~24 page px
 uniform sampler2D uFar;    // and ~48
 uniform vec3 uMap;         // scene width, height (texels), canvas rows below the band
+uniform float uSigma;      // the pond blur, in scene texels
 void main() {
   vec2 uv = (gl_FragCoord.xy - vec2(0.0, uMap.z)) / uMap.xy;
+  vec3 s = vec3(0.0);
+  float n = 0.0;
+  for (int i = -12; i <= 12; i++) {
+    float f = float(i);
+    float k = exp(-f * f / (2.0 * uSigma * uSigma));
+    s += texture2D(uScene, uv + vec2(0.0, f / uMap.y)).rgb * k;
+    n += k;
+  }
   vec3 glow = texture2D(uNear, uv).rgb * 0.6 + texture2D(uFar, uv).rgb * 0.4;
-  gl_FragColor = vec4(min(texture2D(uScene, uv).rgb + glow * 0.3, 1.0), 1.0);
+  gl_FragColor = vec4(min(s / n + glow * 0.3, 1.0), 1.0);
+}`;
+
+// The koi layer, over the finished pond as in the design: sharp, unbloomed.
+// Each koi and its shadow are drawn premultiplied, blended over what's there,
+// so the shadow darkens the pond and the fish covers it. They still look
+// underwater: refracted by the same surface, colour-fringed, cooled, and
+// dappled by a weak copy of the floor's light.
+const KOI_LAYER = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uScale;
+uniform float uOrigin;   // page y of the canvas's top row
+uniform vec3 uBand;      // page width, page y and height of the band buffers
+uniform vec4 uLight;     // caustic texel to light, ambient, sun, mean light
+uniform sampler2D uCaustics;
+uniform sampler2D uFish;
+${SURFACE}
+
+vec2 band(vec2 p) { return vec2(p.x / uBand.x, (p.y - uBand.y) / uBand.z); }
+vec4 fish(vec2 p) { return texture2D(uFish, band(p)); }
+
+void main() {
+  vec2 w = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uScale + vec2(0.0, uOrigin);
+  // Most of the pond has no fish near it: skip the surface maths there.
+  float near = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 d = vec2(float(i), float(j)) * 14.0;
+    near += fish(w + d).a + fish(w - SUN + d).a;
+  }
+  if (near < 0.002) discard;
+
+  vec2 gSwell = swellSlope(w, uTime) + simSlope(w);
+  vec2 off = -gSwell * LENS - lipSlope(w) * 260.0 + waveOffset(w, uTime);
+  // Fish are near the surface, so the glass bends them much less than the
+  // floor beneath them.
+  vec2 fcss = w + off * 0.3;
+
+  // Shadow: the fish layer's alpha, offset towards the sun's fall and
+  // blurred. Nothing blurs it afterwards any more, so it takes two rings of
+  // eight taps (Gaussian weights) to come out a soft blob, not offset copies.
+  vec2 so = fcss - SUN;
+  float sh = fish(so).a * 0.16;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.7854 + 0.39;
+    vec2 d = vec2(cos(a), sin(a));
+    sh += fish(so + d * 6.0).a * 0.065 + fish(so + d * 12.0).a * 0.04;
+  }
+  float shade = sh * 0.45;
+
+  vec2 ca = off * 0.012 + vec2(0.3, 0.0);
+  vec4 fg = (fish(fcss) * 2.0 + fish(fcss + vec2(1.0, 0.0)) + fish(fcss - vec2(1.0, 0.0)) + fish(fcss + vec2(0.0, 1.0)) + fish(fcss - vec2(0.0, 1.0))) / 6.0;
+  vec3 f = vec3(fish(fcss + ca).r, fg.g, fish(fcss - ca).b);
+  float light = texture2D(uCaustics, band(w + off)).r * uLight.x;
+  // Near the surface the light hasn't focused yet: the koi see a weak copy
+  // of the floor's web.
+  f *= vec3(0.84, 0.97, 0.96) * (0.66 + 0.3 * mix(1.0, min(light, 4.0) / uLight.w, 0.35));
+  // A little of the water's colour over them, and the pond's filmic response
+  // (on the straight colour, then premultiplied again).
+  f = mix(f, vec3(0.3, 0.75, 0.74) * fg.a, 0.14);
+  f = (vec3(1.0) - exp(-f / max(fg.a, 0.001) * 1.3)) * fg.a;
+  gl_FragColor = vec4(f, shade + fg.a - shade * fg.a);
 }`;
 
 // The shoreline in page coordinates: base y, wave amplitude, and y at x.
@@ -466,6 +515,9 @@ const CAUSTIC_PAD = 80; // mesh overhang past the band: light can land from outs
 // luminance percentiles measured in the same patch of both at 1440 x 900.
 const AMBIENT = 1.12;
 const SUN = 0.7;
+// The design's "Pond blur" over the pond, under the koi: a 3 px Gaussian
+// (CSS blur(3px)), in page px.
+const POND_BLUR = 3;
 const SIM_PX = 5; // page px per ripple texel
 const SIM_HZ = 120; // fixed sim steps per second, so ripples don't speed up at 144Hz
 const SIM_GAIN = 0.008; // ripple height step to surface slope
@@ -483,10 +535,7 @@ const WAVES: [number, number, number][] = (() => {
 const MARGIN = 0.35; // extra band above and below the screen, in viewport heights
 const MAX_CANVAS = 8192;
 
-// `veil`, if given, is kept over exactly the canvas's box: it carries the
-// backdrop blur that softens the whole pond (a blur on the canvas itself
-// would fade its side edges to the page behind).
-export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: boolean, veil?: HTMLElement) {
+export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: boolean) {
   trackPointer();
   const gl = canvas.getContext("webgl", {
     antialias: false,
@@ -515,7 +564,8 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   const causticStore = causticHalf ? 1 : 1 / 16;
 
   const koi = program(gl, KOI_FRAG, KOI_VERT);
-  if (!koi) return () => {};
+  const koiLayer = program(gl, KOI_LAYER);
+  if (!koi || !koiLayer) return () => {};
   // Without these the composite draws straight onto the page, unbloomed.
   const bloomExtract = program(gl, BLOOM_EXTRACT);
   const bloomBlur = program(gl, BLOOM_BLUR);
@@ -591,6 +641,8 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   // (near) and an eighth (far) of page resolution, each with a twin to
   // ping-pong the blur through.
   const sceneTex = texture(gl.CLAMP_TO_EDGE);
+  const acrossTex = texture(gl.CLAMP_TO_EDGE); // the scene, blurred across
+  let acrossFb: WebGLFramebuffer | null = null;
   const glowTex = [texture(gl.CLAMP_TO_EDGE), texture(gl.CLAMP_TO_EDGE), texture(gl.CLAMP_TO_EDGE), texture(gl.CLAMP_TO_EDGE)];
   const glowFb: (WebGLFramebuffer | null)[] = [null, null, null, null];
   let sceneFb: WebGLFramebuffer | null = null;
@@ -684,7 +736,19 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   const beMap = bloom && gl.getUniformLocation(bloom.extract, "uMap");
   const bePond = bloom && gl.getUniformLocation(bloom.extract, "uPond");
   const buStep = bloom && gl.getUniformLocation(bloom.blur, "uStep");
+  const buSigma = bloom && gl.getUniformLocation(bloom.blur, "uSigma");
   const bfMap = bloom && gl.getUniformLocation(bloom.final, "uMap");
+  const bfSigma = bloom && gl.getUniformLocation(bloom.final, "uSigma");
+  const kl = uni(koiLayer);
+  const klRes = kl("uRes");
+  const klScale = kl("uScale");
+  const klOrigin = kl("uOrigin");
+  const klTime = kl("uTime");
+  const klShore = kl("uShore");
+  const klBand = kl("uBand");
+  const klSimRect = kl("uSimRect");
+  const klSimGain = kl("uSimGain");
+  const klSimAlpha = kl("uSimAlpha");
   if (bloom) {
     gl.useProgram(bloom.final);
     gl.uniform1i(gl.getUniformLocation(bloom.final, "uScene"), 5);
@@ -711,7 +775,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     waveK.set([Math.cos(heading) * k, Math.sin(heading) * k, 2.4 * Math.sqrt(k), i * 4.1], i * 4);
     waveA[i] = strength / (k * k);
   });
-  for (const p of mesh ? [mesh, composite] : []) {
+  for (const p of mesh ? [mesh, composite, koiLayer] : []) {
     gl.useProgram(p);
     gl.uniform4fv(gl.getUniformLocation(p, "uWaveK"), waveK);
     gl.uniform1fv(gl.getUniformLocation(p, "uWaveA"), waveA);
@@ -723,14 +787,20 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     gl.uniform1i(lu("uCur"), 4);
     gl.uniform1i(lu("uPrev"), 5);
   }
+  // The procedural fallback stores half its light; its gaps are unlit and its
+  // light averages about 0.35.
+  const lightMap = mesh ? [1 / causticStore, AMBIENT, SUN, 1] : [2, 1.3, 1.4, 0.35];
   bindProgram(composite);
   gl.uniform1i(mu("uNoise"), 0);
   gl.uniform1i(mu("uCaustics"), 1);
-  gl.uniform1i(mu("uFish"), 2);
   gl.uniform1i(mu("uSim"), 4);
-  // The procedural fallback stores half its light; its gaps are unlit and its
-  // light averages about 0.35.
-  gl.uniform4fv(mu("uLight"), mesh ? [1 / causticStore, AMBIENT, SUN, 1] : [2, 1.3, 1.4, 0.35]);
+  gl.uniform4fv(mu("uLight"), lightMap);
+  gl.useProgram(koiLayer);
+  gl.uniform1i(kl("uNoise"), 0);
+  gl.uniform1i(kl("uCaustics"), 1);
+  gl.uniform1i(kl("uFish"), 2);
+  gl.uniform1i(kl("uSim"), 4);
+  gl.uniform4fv(kl("uLight"), lightMap);
   gl.useProgram(koi);
   gl.uniform1i(ku("uAtlas"), 3);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -755,10 +825,6 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     pondH = Math.max(1, document.documentElement.scrollHeight - top0);
     canvas.style.top = `${top0}px`;
     canvas.style.height = `${pondH}px`;
-    if (veil) {
-      veil.style.top = canvas.style.top;
-      veil.style.height = canvas.style.height;
-    }
     // Rendered a little under full resolution: the browser's smooth upscale is
     // the slight softness wanted over the whole pond, and it's cheaper.
     scale = Math.min(devicePixelRatio, 1.5) * 0.75 * quality;
@@ -782,6 +848,8 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       sceneH = Math.min(canvas.height, Math.ceil(bandH * scale) + 2);
       if (sceneFb) gl.deleteFramebuffer(sceneFb);
       sceneFb = renderTarget(sceneTex, sceneW, sceneH);
+      if (acrossFb) gl.deleteFramebuffer(acrossFb);
+      acrossFb = renderTarget(acrossTex, sceneW, sceneH);
       nearW = Math.ceil(vw / 4);
       nearH = Math.ceil(sceneH / scale / 4);
       farW = Math.ceil(nearW / 2);
@@ -1075,46 +1143,73 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     gl.uniform1f(muSimGain, simGain);
     gl.uniform1f(muSimAlpha, simAlpha);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (!bloom) return;
 
-    // 5. Bloom: extract, blur near (quarter res), halve and blur far (eighth
-    // res), then the scene and glow onto the page's band rows.
-    const pass = (p: WebGLProgram, target: number, w: number, h: number, src: WebGLTexture | null) => {
-      bindProgram(p);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, glowFb[target]);
-      gl.viewport(0, 0, w, h);
-      gl.activeTexture(gl.TEXTURE5);
-      gl.bindTexture(gl.TEXTURE_2D, src);
-      gl.uniform1i(gl.getUniformLocation(p, p === bloom.extract ? "uScene" : "uSrc"), 5);
-      gl.uniform2f(gl.getUniformLocation(p, "uSize"), w, h);
-    };
-    const blur = (target: number, w: number, h: number, src: number, sx: number, sy: number) => {
-      pass(bloom.blur, target, w, h, glowTex[src]);
-      gl.uniform2f(buStep, sx, sy);
+    // The layers from here are the design's, bottom up: Pond (with its
+    // Bloom), Pond blur, Koi.
+    if (bloom) {
+      // 5. Bloom: extract, blur near (quarter res), halve and blur far
+      // (eighth res). Then the pond blur, across here and down in the final
+      // pass, which adds the glow and writes the page's band rows.
+      const pass = (p: WebGLProgram, fb: WebGLFramebuffer | null, w: number, h: number, src: WebGLTexture | null) => {
+        bindProgram(p);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.viewport(0, 0, w, h);
+        gl.activeTexture(gl.TEXTURE5);
+        gl.bindTexture(gl.TEXTURE_2D, src);
+        gl.uniform1i(gl.getUniformLocation(p, p === bloom.extract ? "uScene" : "uSrc"), 5);
+        gl.uniform2f(gl.getUniformLocation(p, "uSize"), w, h);
+      };
+      const blur = (fb: WebGLFramebuffer | null, w: number, h: number, src: WebGLTexture | null, sx: number, sy: number, sigma: number) => {
+        pass(bloom.blur, fb, w, h, src);
+        gl.uniform2f(buStep, sx, sy);
+        gl.uniform1f(buSigma, sigma);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      pass(bloom.extract, glowFb[0], nearW, nearH, sceneTex);
+      gl.uniform4f(beMap, sceneW, sceneH, rowBottom, scale);
+      gl.uniform2f(bePond, pondH, vw);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-    };
-    pass(bloom.extract, 0, nearW, nearH, sceneTex);
-    gl.uniform4f(beMap, sceneW, sceneH, rowBottom, scale);
-    gl.uniform2f(bePond, pondH, vw);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    blur(1, nearW, nearH, 0, 0, 1 / nearH);
-    blur(0, nearW, nearH, 1, 1 / nearW, 0);
-    blur(2, farW, farH, 0, 0, 2 / nearH);
-    blur(3, farW, farH, 2, 1 / farW, 0);
+      blur(glowFb[1], nearW, nearH, glowTex[0], 0, 1 / nearH, 6);
+      blur(glowFb[0], nearW, nearH, glowTex[1], 1 / nearW, 0, 6);
+      blur(glowFb[2], farW, farH, glowTex[0], 0, 2 / nearH, 6);
+      blur(glowFb[3], farW, farH, glowTex[2], 1 / farW, 0, 6);
+      blur(acrossFb, sceneW, sceneH, sceneTex, 1 / sceneW, 0, POND_BLUR * scale);
 
-    bindProgram(bloom.final);
+      bindProgram(bloom.final);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(0, canvas.height - rowBottom, canvas.width, rows);
+      gl.activeTexture(gl.TEXTURE5);
+      gl.bindTexture(gl.TEXTURE_2D, acrossTex);
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, glowTex[0]);
+      gl.activeTexture(gl.TEXTURE7);
+      gl.bindTexture(gl.TEXTURE_2D, glowTex[3]);
+      gl.uniform3f(bfMap, sceneW, sceneH, canvas.height - rowBottom);
+      gl.uniform1f(bfSigma, POND_BLUR * scale);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    // 6. The koi and their shadows over it, sharp, still in the band's rows.
+    bindProgram(koiLayer);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(0, canvas.height - rowBottom, canvas.width, rows);
-    gl.activeTexture(gl.TEXTURE5);
-    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-    gl.activeTexture(gl.TEXTURE6);
-    gl.bindTexture(gl.TEXTURE_2D, glowTex[0]);
-    gl.activeTexture(gl.TEXTURE7);
-    gl.bindTexture(gl.TEXTURE_2D, glowTex[3]);
-    gl.uniform3f(bfMap, sceneW, sceneH, canvas.height - rowBottom);
+    gl.uniform2f(klRes, canvas.width, canvas.height);
+    gl.uniform1f(klScale, scale);
+    gl.uniform1f(klOrigin, top0);
+    gl.uniform1f(klTime, t);
+    gl.uniform3f(klShore, shore.base(), shore.amp(), vw);
+    gl.uniform3f(klBand, vw, bandTop, bandH);
+    gl.uniform4f(klSimRect, 0, simY, simW * SIM_PX, simH * SIM_PX);
+    gl.uniform1f(klSimGain, simGain);
+    gl.uniform1f(klSimAlpha, simAlpha);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.BLEND);
   };
   raf = requestAnimationFrame(frame);
 
