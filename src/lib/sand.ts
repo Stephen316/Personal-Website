@@ -312,6 +312,31 @@ export class Sand {
     if (x1 >= x0 && y1 >= y0) this.mark(x0, y0, x1, y1);
   }
 
+  // Grooves raked along the shore: parallel to `top` (the y where they begin
+  // at each x) from there down to the waterline. Spacing is measured square
+  // to the curve, so they keep their width where it slopes.
+  rakeShore(top: (x: number) => number, shore: (x: number) => number, spacing: number) {
+    const { w, h, height, mask } = this;
+    let y0 = h;
+    for (let x = 0; x < w; x++) {
+      const t = top(x);
+      const slope = (top(x + 1) - top(x - 1)) / 2;
+      const across = 1 / Math.sqrt(1 + slope * slope);
+      const from = Math.max(0, Math.floor(t - spacing));
+      const to = Math.min(h - 1, Math.ceil(shore(x)));
+      y0 = Math.min(y0, from);
+      for (let y = from; y <= to; y++) {
+        const k = y * w + x;
+        if (mask[k]) continue;
+        const v = (y - t) * across;
+        // Fades in over the first groove, into the straight lines above.
+        const a = Math.max(0, Math.min(1, (v + spacing * 0.5) / (spacing * 0.75)));
+        height[k] += (AMP * Math.cos((TAU * v) / spacing) - height[k]) * a;
+      }
+    }
+    if (y0 < h) this.mark(0, y0, w - 1, h - 1);
+  }
+
   // The rake can't pass through a stone.
   buildMask(stones: Stone[]) {
     const { w, h, mask } = this;

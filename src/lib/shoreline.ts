@@ -27,9 +27,31 @@ export type ShorePiece = {
   shadow?: "rock" | "moss";
 };
 
-// Raked sand that follows the shore, under the moss. Drawn inside the sand
-// layer so the shoreline clips it.
-export const SHORE_RIPPLES: ShorePiece = { src: "/shore/shore-ripples.webp", box: [0, 779, 1440, 367], fit: "cover" };
+// Where the grooves raked along the shore begin, in design px above the
+// waterline, every 30 px across the page. Measured from the top edge of the
+// design's shore-ripples layer, which traces the moss and boulders.
+const GROOVES_FROM = [
+  241, 250, 261, 263, 259, 245, 243, 245, 251, 260, 269, 272, 272, 267, 254, 238, 225, 213, 208, 208, 206, 206, 206, 213, 227,
+  245, 258, 251, 238, 218, 207, 200, 204, 231, 247, 258, 269, 284, 295, 298, 294, 284, 277, 270, 253, 240, 220, 205, 192,
+];
+
+// The top of the shore grooves at page x, on a page w x vh. A Catmull-Rom
+// curve through the samples: the grooves are spaced square to it, so a kink
+// in its slope would step every groove sideways.
+export function groovesTop(x: number, w: number, vh: number) {
+  const s = w / DESIGN_W;
+  const n = GROOVES_FROM.length;
+  const i = Math.max(0, Math.min(n - 1.001, x / s / 30));
+  const k = Math.floor(i);
+  const t = i - k;
+  const at = (j: number) => GROOVES_FROM[Math.max(0, Math.min(n - 1, j))];
+  const p0 = at(k - 1);
+  const p1 = at(k);
+  const p2 = at(k + 1);
+  const p3 = at(k + 2);
+  const above = p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+  return shoreAt(x, w, vh) - above * s;
+}
 
 // Bottom to top, as layered in the design.
 export const SHORE_PIECES: ShorePiece[] = [

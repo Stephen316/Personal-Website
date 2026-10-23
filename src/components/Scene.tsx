@@ -3,7 +3,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import { startGarden } from "@/lib/garden";
 import { startPond } from "@/lib/pond";
-import { placePiece, SHORE_PIECES, SHORE_RIPPLES, shoreAt, type ShorePiece } from "@/lib/shoreline";
+import { groovesTop, placePiece, SHORE_PIECES, shoreAt, type ShorePiece } from "@/lib/shoreline";
 
 // The page background: the zen garden's sand on top of a koi pond. Both are
 // ordinary absolutely positioned layers in the page, so the browser scrolls
@@ -17,17 +17,15 @@ export function Scene() {
   const floor = useRef<HTMLCanvasElement>(null);
   const veil = useRef<HTMLDivElement>(null);
   const shoreLayer = useRef<HTMLDivElement>(null);
-  const ripples = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!sandLayer.current || !sand.current || !stones.current || !floor.current || !veil.current || !shoreLayer.current || !ripples.current) return;
+    if (!sandLayer.current || !sand.current || !stones.current || !floor.current || !veil.current || !shoreLayer.current) return;
     const layer = sandLayer.current;
     const sandCanvas = sand.current;
     const stoneCanvas = stones.current;
     const pondCanvas = floor.current;
     const pondVeil = veil.current;
     const edge = shoreLayer.current;
-    const shoreRipples = ripples.current;
 
     let w = 0;
     let h = 0;
@@ -52,7 +50,6 @@ export function Scene() {
         pts.push(`${x.toFixed(1)}px ${shore(x).toFixed(1)}px`);
       }
       layer.style.clipPath = `polygon(${pts.join(",")})`;
-      place(shoreRipples, SHORE_RIPPLES);
       // The edge layer clips the pieces hanging off the sides, and their
       // shadows scale with them.
       let bottom = 0;
@@ -79,7 +76,10 @@ export function Scene() {
       started = true;
       layout();
       addEventListener("resize", layout);
-      stopGarden = startGarden(sandCanvas, stoneCanvas, () => ({ w, h }), (x, y) => y < shore(x) - 4, titleRight);
+      stopGarden = startGarden(sandCanvas, stoneCanvas, () => ({ w, h }), (x, y) => y < shore(x) - 4, titleRight, {
+        at: shore,
+        grooves: (x) => groovesTop(x, w, innerHeight),
+      });
       stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced, pondVeil);
     };
     start();
@@ -104,9 +104,6 @@ export function Scene() {
       <div ref={veil} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-20 backdrop-blur-[3px]" />
       <div ref={sandLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[130vh] [&>canvas]:blur-[0.4px]">
         <canvas ref={sand} className="absolute inset-0 h-full w-full" />
-        <div ref={ripples} className="absolute">
-          <ShoreImage piece={SHORE_RIPPLES} />
-        </div>
         <canvas ref={stones} className="absolute inset-0 h-full w-full" />
       </div>
       <div ref={shoreLayer} aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-[5] overflow-hidden">
