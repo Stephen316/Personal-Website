@@ -105,14 +105,16 @@ function grainCanvas(tile: SandTile) {
 
 // Hovering rakes the sand. The sand scrolls with the page, so everything
 // here is in document coordinates: `size` is the sand's extent and `canRake`
-// says whether a document point is on sand (above the shoreline), and
-// `textRight` is the x where the hero title ends.
+// says whether a document point is on sand (above the shoreline),
+// `textRight` is the x where the hero title ends, and `shore` gives, at x,
+// the waterline and where the grooves raked along it begin.
 export function startGarden(
   sandCanvas: HTMLCanvasElement,
   stoneCanvas: HTMLCanvasElement,
   size: () => { w: number; h: number },
   canRake: (x: number, y: number) => boolean,
   textRight: () => number,
+  shore: { at: (x: number) => number; grooves: (x: number) => number },
 ) {
   const sandCtx = sandCanvas.getContext("2d");
   const stoneCtx = stoneCanvas.getContext("2d");
@@ -184,6 +186,7 @@ export function startGarden(
     stones = layoutStones(w, innerHeight, textRight());
     sand.buildMask(stones);
     sand.rakeStraight(SPACING);
+    sand.rakeShore(shore.grooves, shore.at, SPACING);
     for (const s of stones) sand.ring(s, SPACING, RINGS);
     shadowed = new Set();
     castShadows();
