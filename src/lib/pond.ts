@@ -1,4 +1,4 @@
-import { KOI_FLOATS_PER_FISH, makeSchool, schoolBounds, updateSchool, writeKoiMesh, type KoiKind } from "./koi";
+import { KOI_FLOATS_PER_FISH, makeSchool, scatter, SCATTER_EVENT, schoolBounds, updateSchool, writeKoiMesh, type KoiKind } from "./koi";
 import { pointer, trackPointer } from "./pointer";
 import { mulberry32 } from "./sand";
 
@@ -1371,6 +1371,11 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   addEventListener("focus", wake);
   addEventListener("scroll", wake, { passive: true });
   document.addEventListener("visibilitychange", wake);
+  const scatterKoi = () => {
+    scatter(school, vw);
+    wake();
+  };
+  addEventListener(SCATTER_EVENT, scatterKoi);
 
   return () => {
     cancelAnimationFrame(raf);
@@ -1380,6 +1385,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     removeEventListener("focus", wake);
     removeEventListener("scroll", wake);
     document.removeEventListener("visibilitychange", wake);
+    removeEventListener(SCATTER_EVENT, scatterKoi);
   };
 }
 

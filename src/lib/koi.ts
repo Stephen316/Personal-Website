@@ -21,6 +21,7 @@ export type Koi = {
   fear: number; // seconds of fleeing left
   wary: number; // seconds left before it will come back to the cursor
   flee: P; // unit direction it's fleeing in
+  exit: number; // -1 or 1 once it's leaving the pond off that side, else 0
 };
 
 const SEGMENTS = 14;
@@ -47,6 +48,7 @@ export function makeSchool(count: number, w: number, y0: number, y1: number, sca
       fear: 0,
       wary: 0,
       flee: { x: 1, y: 0 },
+      exit: 0,
     };
   });
 }
@@ -57,6 +59,19 @@ export type Water = { w: number; top: (x: number) => number; bottom: number; vie
 
 // The cursor in page coordinates, with how fast it's moving (px/s).
 export type Cursor = P & { speed: number };
+
+// Sent when the page opens a project: every fish darts off the nearer side.
+export const SCATTER_EVENT = "koi:scatter";
+const EXIT_SPEED = 950; // px/s
+
+export function scatter(school: Koi[], w: number) {
+  for (const f of school) {
+    f.exit = f.pts[0].x < w / 2 ? -1 : 1;
+    f.fear = 3;
+    f.wary = Infinity;
+    f.speed = Math.max(f.speed, 320);
+  }
+}
 
 const STARTLE_SPEED = 1700; // px/s, averaged; a brisk flick, not ordinary movement
 
@@ -110,7 +125,10 @@ export function updateSchool(school: Koi[], cursor: Cursor | null, water: Water,
     const target = f.wary > 0 ? null : cursor;
     let tx: number;
     let ty: number;
-    if (f.fear > 0) {
+    if (f.exit) {
+      tx = head.x + f.exit * 600;
+      ty = head.y;
+    } else if (f.fear > 0) {
       tx = head.x + f.flee.x * 400;
       ty = head.y + f.flee.y * 400;
     } else if (target) {
@@ -161,11 +179,11 @@ export function updateSchool(school: Koi[], cursor: Cursor | null, water: Water,
 
     // Fleeing fish burst and then coast down; wary ones dawdle; calm ones
     // close in on the cursor.
-    const cruise = scared ? 120 + 200 * Math.min(1, f.fear) : target ? Math.min(170, 35 + dist * 0.55) : f.wary > 0 ? 30 : 38;
-    f.speed += (cruise - f.speed) * Math.min(1, dt * (scared ? 2.5 : 1.5));
+    const cruise = f.exit ? EXIT_SPEED : scared ? 120 + 200 * Math.min(1, f.fear) : target ? Math.min(170, 35 + dist * 0.55) : f.wary > 0 ? 30 : 38;
+    f.speed += (cruise - f.speed) * Math.min(1, dt * (f.exit ? 4 : scared ? 2.5 : 1.5));
     head.x += Math.cos(f.angle) * f.speed * dt;
     head.y += Math.sin(f.angle) * f.speed * dt;
-    head.x = Math.max(-60, Math.min(w + 60, head.x));
+    if (!f.exit) head.x = Math.max(-60, Math.min(w + 60, head.x));
     head.y = Math.min(bottom - f.width, Math.max(head.y, top(head.x) + f.width * 0.6));
 
     for (let i = 1; i < f.pts.length; i++) {

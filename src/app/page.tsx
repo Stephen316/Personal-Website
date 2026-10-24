@@ -1,6 +1,6 @@
-import { GlassCard } from "@/components/GlassCard";
+import { ProjectCards } from "@/components/ProjectCards";
 import { Scene } from "@/components/Scene";
-import { projects, site } from "@/content/site";
+import { site } from "@/content/site";
 
 export default function Home() {
   return (
@@ -29,32 +29,7 @@ export default function Home() {
             <h2 id="projects-title" className="mb-6 font-display text-3xl font-semibold text-foam [text-shadow:0_1px_8px_rgb(0_40_45/0.5)]">
               Projects
             </h2>
-            <ol className="grid max-w-3xl gap-4">
-              {projects.map((p) => (
-                <li key={p.name}>
-                  <GlassCard>
-                    <div className="flex flex-col gap-3 p-6 text-ink">
-                      <h3 className="font-display text-2xl font-semibold">{p.name}</h3>
-                      <p className="leading-relaxed text-muted">{p.summary}</p>
-                      <p className="font-mono text-xs text-muted">{p.stack.join(" · ")}</p>
-                      <div className="flex flex-wrap gap-x-5 gap-y-2 pt-1 text-sm">
-                        {p.links.map((l) => (
-                          <a
-                            key={l.href}
-                            href={l.href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-medium underline decoration-ink/30 underline-offset-4 transition-colors hover:text-moss hover:decoration-moss"
-                          >
-                            {l.label} ↗
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  </GlassCard>
-                </li>
-              ))}
-            </ol>
+            <ProjectCards />
           </section>
         </main>
 

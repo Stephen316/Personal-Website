@@ -10,6 +10,7 @@
   --card: rgb(248 242 229 / 0.9);
   --card-line: #d8c8a6;
   --foam: #f4fbf8;
+  --pond: #0a666a;
   color-scheme: light;
 }
 
@@ -21,6 +22,7 @@
   --color-card: var(--card);
   --color-card-line: var(--card-line);
   --color-foam: var(--foam);
+  --color-pond: var(--pond);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-cormorant);
@@ -31,6 +33,11 @@ body {
   background: var(--sand);
   color: var(--ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Project pages are water to the edges, overscroll included. */
+body:has(.pond-page) {
+  background: var(--pond);
 }
 
 :focus-visible {
