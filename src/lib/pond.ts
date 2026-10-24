@@ -425,7 +425,7 @@ void main() {
 // Extract: the bright, spotlit scene at quarter page resolution. Four
 // bilinear taps, so caustic lines a texel wide don't sparkle on the way down.
 const BLOOM_EXTRACT = `
-precision mediump float;
+precision highp float;
 uniform sampler2D uScene;
 uniform vec2 uSize;      // this target, texels
 uniform vec4 uMap;       // scene width, height (texels), band's bottom canvas row, canvas px per page px
@@ -445,49 +445,54 @@ void main() {
   gl_FragColor = vec4(c * bright * spot, 1.0);
 }`;
 
-// One direction of a Gaussian, sigma uSigma taps of uStep (up to 12 taps
-// each way). Blurs the glow, halves it, and blurs the pond across.
+// One direction of a Gaussian, sigma s taps of `dir` (12 taps each way), in
+// 13 reads: each pair of neighbouring taps is one bilinear read placed
+// between them and weighted as the pair, the same sum as 25 single reads.
+const GAUSS = `
+vec3 gauss(sampler2D src, vec2 uv, vec2 dir, float s) {
+  float d = 2.0 * s * s;
+  vec3 sum = texture2D(src, uv).rgb;
+  float n = 1.0;
+  for (int i = 0; i < 6; i++) {
+    float a = float(2 * i + 1);
+    float wa = exp(-a * a / d);
+    float wb = exp(-(a + 1.0) * (a + 1.0) / d);
+    float w = wa + wb;
+    vec2 o = dir * (a + wb / w);
+    sum += (texture2D(src, uv + o).rgb + texture2D(src, uv - o).rgb) * w;
+    n += 2.0 * w;
+  }
+  return sum / n;
+}`;
+
+// Blurs the glow, halves it, and blurs the pond across.
 const BLOOM_BLUR = `
-precision mediump float;
+precision highp float;
 uniform sampler2D uSrc;
 uniform vec2 uSize;      // this target, texels
 uniform vec2 uStep;      // one tap, in the source's uv
 uniform float uSigma;
+${GAUSS}
 void main() {
-  vec2 uv = gl_FragCoord.xy / uSize;
-  vec3 s = vec3(0.0);
-  float n = 0.0;
-  for (int i = -12; i <= 12; i++) {
-    float f = float(i);
-    float k = exp(-f * f / (2.0 * uSigma * uSigma));
-    s += texture2D(uSrc, uv + uStep * f).rgb * k;
-    n += k;
-  }
-  gl_FragColor = vec4(s / n, 1.0);
+  gl_FragColor = vec4(gauss(uSrc, gl_FragCoord.xy / uSize, uStep, uSigma), 1.0);
 }`;
 
 // The pond onto the page canvas, texel for texel: the design's "Pond blur"
 // down (the scene comes in already blurred across), with the glow added
 // first, as Pond (with its Bloom) sits under Pond blur there.
 const BLOOM_FINAL = `
-precision mediump float;
+precision highp float;
 uniform sampler2D uScene;
 uniform sampler2D uNear;   // glow blurred ~24 page px
 uniform sampler2D uFar;    // and ~48
 uniform vec3 uMap;         // scene width, height (texels), canvas rows below the band
 uniform float uSigma;      // the pond blur, in scene texels
+${GAUSS}
 void main() {
   vec2 uv = (gl_FragCoord.xy - vec2(0.0, uMap.z)) / uMap.xy;
-  vec3 s = vec3(0.0);
-  float n = 0.0;
-  for (int i = -12; i <= 12; i++) {
-    float f = float(i);
-    float k = exp(-f * f / (2.0 * uSigma * uSigma));
-    s += texture2D(uScene, uv + vec2(0.0, f / uMap.y)).rgb * k;
-    n += k;
-  }
+  vec3 pond = gauss(uScene, uv, vec2(0.0, 1.0 / uMap.y), uSigma);
   vec3 glow = texture2D(uNear, uv).rgb * 0.6 + texture2D(uFar, uv).rgb * 0.4;
-  gl_FragColor = vec4(min(s / n + glow * 0.3, 1.0), 1.0);
+  gl_FragColor = vec4(min(pond + glow * 0.3, 1.0), 1.0);
 }`;
 
 // The koi layer, over the finished pond as in the design: sharp, unbloomed.
@@ -569,6 +574,10 @@ const SUN = 0.7;
 // The design's "Pond blur" over the pond, under the koi: a 3 px Gaussian
 // (CSS blur(3px)), in page px.
 const POND_BLUR = 3;
+// Page px round the school the koi layer draws: shadows fall SUN (22, 32)
+// away and blur another 12, the early-out looks 14 further, and the water
+// shifts the fish by up to ~15.
+const KOI_PAD = 90;
 const SIM_PX = 5; // page px per ripple texel
 const SIM_HZ = 120; // fixed sim steps per second, so ripples don't speed up at 144Hz
 const SIM_GAIN = 0.008; // ripple height step to surface slope
@@ -582,6 +591,10 @@ const CURSOR_WAKE = 8;
 // reflected off the pond's edges. Strength falls gently with wavelength and
 // is scaled so the squares sum to 5, the focusing the web was tuned at.
 const WIND_HEADING = 0.5;
+// How fast the light web moves: a multiplier on the waves' natural speed
+// (2.4 sqrt(k) rad/s, ~13 px/s for a 180 px wave). Costs nothing: the same
+// waves are evaluated every frame whatever their speed.
+const WAVE_SPEED = 2;
 const WAVES: [number, number, number, number][] = (() => {
   const rand = mulberry32(7);
   const waves = Array.from({ length: WAVE_COUNT }, () => {
@@ -763,6 +776,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       });
       atlasReady = true;
       seeded = false;
+      wake(); // draw the fish in even if the pond is paused
     } catch {
       // Without the atlas the pond simply has no fish.
     }
@@ -851,7 +865,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   WAVES.forEach(([heading, length, strength, phase], i) => {
     const k = (2 * Math.PI) / length;
     // Deep-water dispersion: longer ripples run faster.
-    waveK.set([Math.cos(heading) * k, Math.sin(heading) * k, 2.4 * Math.sqrt(k), phase], i * 4);
+    waveK.set([Math.cos(heading) * k, Math.sin(heading) * k, WAVE_SPEED * 2.4 * Math.sqrt(k), phase], i * 4);
     waveA[i] = strength / (k * k);
   });
   for (const p of mesh && field ? [mesh, field] : []) {
@@ -1007,6 +1021,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     relayout = window.setTimeout(() => {
       layout();
       seeded = false;
+      wake(); // layout clears the canvas; redraw it even while paused
     }, 120);
   };
   layout();
@@ -1015,15 +1030,22 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   const ro = new ResizeObserver(onResize);
   ro.observe(document.body);
 
+  // The pond only runs while it's being looked at: a hidden tab or another
+  // window in front pauses it (its clock, ripples and koi with it), and it
+  // picks up where it stopped. While paused, a scroll or resize still draws
+  // one frozen frame, so newly revealed rows aren't left blank.
+  const looking = () => !document.hidden && document.hasFocus();
   let raf = 0;
   let last = performance.now();
+  let clock = 0; // pond time, s: advances only while running
   let lastPointer: { x: number; y: number } | null = null;
   let cursorSpeed = 0;
   let slow = 0;
   let fishShown = true;
   const frame = (now: number) => {
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (now - last) / 1000);
+    const live = looking();
+    raf = live ? requestAnimationFrame(frame) : 0;
+    const dt = live ? Math.min(0.05, (now - last) / 1000) : 0;
     last = now;
     const top = scrollY;
 
@@ -1042,7 +1064,8 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       layout();
     }
 
-    const t = reduced ? 12 : now / 1000;
+    clock += dt;
+    const t = reduced ? 12 : clock;
     if (!seeded) {
       const s0 = shore.base() + shore.amp() * 2;
       const size = Math.min(1.3, Math.max(0.65, Math.min(vw, vh) / 850));
@@ -1303,12 +1326,23 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
 
-    // 6. The koi and their shadows over it, sharp, still in the band's rows.
+    // 6. The koi and their shadows over it, sharp, only in a box round the
+    // school: padded past the fish for their shadows (SUN plus their blur)
+    // and how far the water bends them, and clipped to the band's rows.
+    const kx0 = Math.max(0, Math.floor((b.x0 - KOI_PAD) * scale));
+    const kx1 = Math.min(canvas.width, Math.ceil((b.x1 + KOI_PAD) * scale));
+    const ky0 = Math.max(rowTop, Math.floor((b.y0 - KOI_PAD - top0) * scale));
+    const ky1 = Math.min(rowBottom, Math.ceil((b.y1 + KOI_PAD - top0) * scale));
+    if (!visible || kx1 <= kx0 || ky1 <= ky0) {
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+      return;
+    }
     bindProgram(koiLayer);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(0, canvas.height - rowBottom, canvas.width, rows);
+    gl.scissor(kx0, canvas.height - ky1, kx1 - kx0, ky1 - ky0);
     gl.uniform2f(klRes, canvas.width, canvas.height);
     gl.uniform1f(klScale, scale);
     gl.uniform1f(klOrigin, top0);
@@ -1326,13 +1360,26 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, atlasTex);
   };
-  raf = requestAnimationFrame(frame);
+  // Starts the loop again, or, while paused, draws one frozen frame. A
+  // declaration, so the atlas loader above can call it once it's loaded.
+  function wake() {
+    if (raf) return;
+    last = performance.now();
+    raf = requestAnimationFrame(frame);
+  }
+  wake();
+  addEventListener("focus", wake);
+  addEventListener("scroll", wake, { passive: true });
+  document.addEventListener("visibilitychange", wake);
 
   return () => {
     cancelAnimationFrame(raf);
     clearTimeout(relayout);
     ro.disconnect();
     removeEventListener("resize", onResize);
+    removeEventListener("focus", wake);
+    removeEventListener("scroll", wake);
+    document.removeEventListener("visibilitychange", wake);
   };
 }
 

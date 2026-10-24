@@ -202,15 +202,19 @@ function frames(f: Koi): Frame[] {
 
 // Vertical extent of the school in page coordinates, fins included.
 export function schoolBounds(school: Koi[]) {
+  let x0 = Infinity;
+  let x1 = -Infinity;
   let y0 = Infinity;
   let y1 = -Infinity;
   for (const f of school) {
     for (const p of f.pts) {
+      x0 = Math.min(x0, p.x - f.width * 2);
+      x1 = Math.max(x1, p.x + f.width * 2);
       y0 = Math.min(y0, p.y - f.width * 2);
       y1 = Math.max(y1, p.y + f.width * 2);
     }
   }
-  return { y0, y1 };
+  return { x0, x1, y0, y1 };
 }
 
 // ---------------------------------------------------------------------------
