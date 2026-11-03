@@ -1,0 +1,10 @@
+{
+  // Serves the static export from `next build` (output: "export") with no
+  // Worker script, so Cloudflare doesn't try to run Next.js as a server.
+  "name": "personal-website",
+  "compatibility_date": "2026-11-02",
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  }
+}
