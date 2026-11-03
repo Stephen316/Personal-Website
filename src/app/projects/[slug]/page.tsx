@@ -4,11 +4,6 @@ import { PondBackdrop } from "@/components/PondBackdrop";
 import { ProjectView } from "@/components/ProjectView";
 import { projects, site } from "@/content/site";
 
-// Allowed to block: the home page's opening transition holds its last frame,
-// which is this page, until the page is ready, so a loading state would only
-// flash in between.
-export const instant = false;
-
 export function generateStaticParams() {
   return projects.map((p) => ({ slug: p.slug }));
 }
