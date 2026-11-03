@@ -19,10 +19,6 @@ export default function Home() {
           <section className="flex min-h-[calc(100svh-4rem)] flex-col justify-center pb-24 sm:pb-52">
             <h1 className="font-signature text-6xl font-normal italic sm:text-8xl">{site.name}</h1>
             <p className="mt-5 max-w-md text-lg text-muted">{site.intro}</p>
-            <p className="mt-10 font-mono text-xs text-muted">
-              <span className="hidden sm:inline">Move your cursor across the sand to rake it. </span>
-              Scroll down to the pond.
-            </p>
           </section>
 
           <section id="projects" aria-labelledby="projects-title" className="pt-[calc(45vh-58px)] pb-32">

@@ -11,19 +11,19 @@ export type Project = {
 
 export const site = {
   name: "Stephen Harcourt",
-  // TODO: rewrite in your own words.
-  intro: "I build apps and tools, most of the time it's because I'm bored.",
+  intro: "I build apps and tools that people don’t need yet. I’m a visionary.",
   github: "https://github.com/Stephen316",
 };
 
 // Projects, most recently worked on first.
 export const projects: Project[] = [
   {
-    // TODO: placeholder — replace the summary, stack, links and about.
+    // TODO: placeholder — add the links and about.
     slug: "unicad",
     name: "UniCAD",
-    summary: "Summary coming soon.",
-    stack: ["TBC"],
+    summary:
+      "A unified conversion tool for all native CAD files. It makes conversion between Solidworks, Fusion360 and FreeCAD possible, while aiming to preserve their geometry, feature history and design intent.",
+    stack: ["Python 3"],
     links: [],
   },
   {
