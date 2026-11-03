@@ -84,7 +84,7 @@ export function Scene() {
         at: shore,
         grooves: (x) => groovesTop(x, w, innerHeight),
       });
-      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced);
+      stopPond = startPond(pondCanvas, { base: () => h - amp * 1.15, amp: () => amp, at: shore }, reduced ? "still" : "full");
     };
     start();
     if (!started) addEventListener("resize", start);

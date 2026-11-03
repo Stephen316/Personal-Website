@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { GlassCard } from "@/components/GlassCard";
+import { handOff, openWater } from "@/components/PondBackdrop";
 import { ProjectView } from "@/components/ProjectView";
 import { projects, type Project } from "@/content/site";
 import { SCATTER_EVENT } from "@/lib/koi";
@@ -15,10 +16,11 @@ const href = (p: Project) => `/projects/${p.slug}`;
 // Where the clicked card's name was on screen, as the flight starts from it.
 type Opening = { project: Project; from: DOMRect; fromSize: number; fromLine: number };
 
-// The project cards. Clicking one opens its page in place: the pond floor
-// rises up the screen, everything behind blurs into plain water, the koi
-// dart off the sides, and the card's name grows into the page's title. Only
-// then does the router move to the page, which draws exactly that last frame.
+// The project cards. Clicking one opens its page in place: open water rises
+// up the screen over everything, which blurs behind it, the koi dart off the
+// sides, and the card's name grows into the page's title. Only then does the
+// router move to the page, which draws exactly that last frame and takes the
+// water over as its background.
 export function ProjectCards() {
   const router = useRouter();
   const [opening, setOpening] = useState<Opening | null>(null);
@@ -95,7 +97,7 @@ const EASE = "cubic-bezier(0.65, 0, 0.35, 1)";
 function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone: () => void; onLeft: () => void }) {
   const blur = useRef<HTMLDivElement>(null);
   const water = useRef<HTMLDivElement>(null);
-  const fill = useRef<HTMLDivElement>(null);
+  const pond = useRef<HTMLDivElement>(null);
   const view = useRef<HTMLDivElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const flight = useRef<HTMLDivElement>(null);
@@ -105,7 +107,7 @@ function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone:
   const left = useRef(onLeft);
 
   useLayoutEffect(() => {
-    if (!blur.current || !water.current || !fill.current || !view.current || !title.current || !flight.current || !asCard.current || !asTitle.current) return;
+    if (!blur.current || !water.current || !pond.current || !view.current || !title.current || !flight.current || !asCard.current || !asTitle.current) return;
     // The flight sits on the page's title, and starts scaled down onto the
     // card's name. Both spans share the title's line box (its font size), so
     // the start is nudged to centre that in the card name's taller one.
@@ -123,15 +125,21 @@ function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone:
     const shore = shoreAt(innerWidth / 2, innerWidth, vh) - scrollY;
     const start = shore > vh * 0.25 && shore < vh ? shore : vh;
     water.current.style.height = `${vh + EDGE}px`;
+    pond.current.style.height = `${vh}px`;
+    const open = openWater();
+    pond.current.append(open.canvas);
 
     dispatchEvent(new Event(SCATTER_EVENT));
     const run = (el: HTMLElement, frames: Keyframe[], o: KeyframeAnimationOptions) => el.animate(frames, { duration: DURATION, fill: "both", ...o });
+    // The water's edge rises while the pond inside it is held still on
+    // screen, so it reads as the water extending, not sliding up.
+    const rise = "cubic-bezier(0.5, 0, 0.25, 1)";
     const animations = [
       run(water.current, [{ transform: `translateY(${start - EDGE / 2}px)`, opacity: 0 }, { opacity: 1, offset: 0.3 }, { transform: `translateY(${-EDGE}px)`, opacity: 1 }], {
-        easing: "cubic-bezier(0.5, 0, 0.25, 1)",
+        easing: rise,
       }),
+      run(pond.current, [{ transform: `translateY(${EDGE / 2 - start}px)` }, { transform: `translateY(${EDGE}px)` }], { easing: rise }),
       run(blur.current, [{ opacity: 0 }, { opacity: 1 }], { duration: DURATION * 0.6, easing: "ease-out" }),
-      run(fill.current, [{ opacity: 0 }, { opacity: 1 }], { delay: DURATION * 0.35, duration: DURATION * 0.65, easing: "ease-in-out" }),
       run(flight.current, [{ transform: `translate(${dx}px, ${dy}px) scale(${s})` }, { transform: "none" }], { easing: EASE }),
       run(asCard.current, [{ opacity: 1 }, { opacity: 1, offset: 0.15 }, { opacity: 0, offset: 0.6 }, { opacity: 0 }], {}),
       run(asTitle.current, [{ opacity: 0 }, { opacity: 0, offset: 0.15 }, { opacity: 1, offset: 0.6 }, { opacity: 1 }], {}),
@@ -144,6 +152,7 @@ function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone:
     Promise.all(animations.map((a) => a.finished)).then(() => {
       if (!live) return;
       navigated = true;
+      handOff(open);
       finish();
     }, () => {});
 
@@ -157,6 +166,10 @@ function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone:
       removeEventListener("wheel", hold);
       removeEventListener("touchmove", hold);
       if (navigated) leave();
+      else {
+        open.stop();
+        open.canvas.remove();
+      }
     };
   }, [opening]);
 
@@ -165,10 +178,11 @@ function OpeningProject({ opening, onDone, onLeft }: { opening: Opening; onDone:
       <div ref={blur} className="absolute inset-0 opacity-0 backdrop-blur-[10px]" />
       <div
         ref={water}
-        className="absolute inset-x-0 top-0 bg-pond/55 backdrop-blur-[18px]"
+        className="absolute inset-x-0 top-0 overflow-hidden"
         style={{ maskImage: `linear-gradient(transparent, black ${EDGE}px)`, transform: "translateY(100vh)" }}
-      />
-      <div ref={fill} className="absolute inset-0 bg-pond opacity-0" />
+      >
+        <div ref={pond} className="absolute inset-x-0 top-0 bg-water" />
+      </div>
       <div ref={view} inert className="absolute inset-0 flex flex-col overflow-hidden opacity-0">
         <ProjectView project={opening.project} titleRef={title} hideTitle />
       </div>

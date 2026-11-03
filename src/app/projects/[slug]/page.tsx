@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { PondBackdrop } from "@/components/PondBackdrop";
 import { ProjectView } from "@/components/ProjectView";
 import { projects, site } from "@/content/site";
 
@@ -23,7 +24,8 @@ export default async function ProjectPage({ params }: PageProps<"/projects/[slug
   const project = projects.find((p) => p.slug === slug);
   if (!project) notFound();
   return (
-    <div className="pond-page flex flex-1 flex-col bg-pond">
+    <div className="pond-page flex flex-1 flex-col">
+      <PondBackdrop />
       <ProjectView project={project} />
     </div>
   );

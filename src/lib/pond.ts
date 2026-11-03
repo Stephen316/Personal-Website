@@ -558,6 +558,13 @@ void main() {
 
 // The shoreline in page coordinates: base y, wave amplitude, and y at x.
 export type Shore = { base: () => number; amp: () => number; at: (x: number) => number };
+// Open water, seen away from any shore: one far enough above the page that
+// none of its light reaches, and near enough for mediump.
+const NO_SHORE: Shore = { base: () => -2e4, amp: () => 0, at: () => -2e4 };
+
+// How much of the pond moves: everything; only the light (no koi, and no
+// ripples, so nothing to touch); or nothing, for reduced motion.
+export type Motion = "full" | "calm" | "still";
 
 const NOISE_SIZE = 512;
 // The mesh pass costs per vertex, not per pixel, so the light renders at full
@@ -609,7 +616,10 @@ const WAVES: [number, number, number, number][] = (() => {
 const MARGIN = 0.35; // extra band above and below the screen, in viewport heights
 const MAX_CANVAS = 8192;
 
-export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: boolean) {
+// Without a shore the pond is open water pinned to the screen: it fills the
+// canvas's box and doesn't scroll.
+export function startPond(canvas: HTMLCanvasElement, edge: Shore | null, motion: Motion) {
+  const shore = edge ?? NO_SHORE;
   trackPointer();
   const gl = canvas.getContext("webgl", {
     antialias: false,
@@ -632,7 +642,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     // Without WebGL the CSS gradient on the canvas element stands in for water.
     return () => {};
   }
-  const simFormat = mesh && !reduced ? floatFormat(gl) : null;
+  const simFormat = mesh && motion === "full" ? floatFormat(gl) : null;
   const simStep = simFormat && program(gl, SIM_STEP);
   const simSlope = simFormat && program(gl, SIM_SLOPE);
   const sim = simFormat && simStep && simSlope ? { format: simFormat, step: simStep, slope: simSlope } : null;
@@ -751,6 +761,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   let kinds: KoiKind[] = [];
   let atlasReady = false;
   void (async () => {
+    if (motion !== "full") return;
     try {
       type Rect = [number, number, number, number];
       type Meta = { width: number; height: number; fish: { body: Rect; tail: Rect; pec: Rect; pelvic: Rect }[] };
@@ -915,13 +926,18 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
   const layout = () => {
     vw = innerWidth;
     vh = innerHeight;
-    top0 = Math.floor(shore.base() - shore.amp() * 1.3);
-    // Measure the page without this canvas, which would otherwise hold the
-    // document at its old height.
-    canvas.style.height = "0px";
-    pondH = Math.max(1, document.documentElement.scrollHeight - top0);
-    canvas.style.top = `${top0}px`;
-    canvas.style.height = `${pondH}px`;
+    if (edge) {
+      top0 = Math.floor(shore.base() - shore.amp() * 1.3);
+      // Measure the page without this canvas, which would otherwise hold the
+      // document at its old height.
+      canvas.style.height = "0px";
+      pondH = Math.max(1, document.documentElement.scrollHeight - top0);
+      canvas.style.top = `${top0}px`;
+      canvas.style.height = `${pondH}px`;
+    } else {
+      top0 = 0;
+      pondH = vh;
+    }
     // Rendered a little under full resolution: the browser's smooth upscale is
     // the slight softness wanted over the whole pond, and it's cheaper.
     scale = Math.min(devicePixelRatio, 1.5) * 0.75 * quality;
@@ -1047,7 +1063,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     raf = live ? requestAnimationFrame(frame) : 0;
     const dt = live ? Math.min(0.05, (now - last) / 1000) : 0;
     last = now;
-    const top = scrollY;
+    const top = edge ? scrollY : 0;
 
     // The band this frame: the screen plus a margin, clipped to the pond.
     const bandTop = Math.max(top0, Math.min(top0 + pondH - bandH, top - vh * MARGIN));
@@ -1065,7 +1081,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
     }
 
     clock += dt;
-    const t = reduced ? 12 : clock;
+    const t = motion === "still" ? 12 : clock;
     if (!seeded) {
       const s0 = shore.base() + shore.amp() * 2;
       const size = Math.min(1.3, Math.max(0.65, Math.min(vw, vh) / 850));
@@ -1076,7 +1092,7 @@ export function startPond(canvas: HTMLCanvasElement, shore: Shore, reduced: bool
       wakeFrom = school.map(() => null);
       seeded = true;
     }
-    if (!reduced) {
+    if (motion === "full") {
       // Cursor speed from screen movement (scrolling isn't the cursor moving),
       // averaged over about 70ms so one jumpy frame can't read as a flick.
       if (pointer.active && lastPointer && dt > 0) {

@@ -10,7 +10,7 @@
   --card: rgb(248 242 229 / 0.9);
   --card-line: #d8c8a6;
   --foam: #f4fbf8;
-  --pond: #0a666a;
+  --water: rgb(96 222 231); /* the open pond's light, averaged: what it blurs to */
   color-scheme: light;
 }
 
@@ -22,7 +22,7 @@
   --color-card: var(--card);
   --color-card-line: var(--card-line);
   --color-foam: var(--foam);
-  --color-pond: var(--pond);
+  --color-water: var(--water);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-display: var(--font-cormorant);
@@ -37,7 +37,7 @@ body {
 
 /* Project pages are water to the edges, overscroll included. */
 body:has(.pond-page) {
-  background: var(--pond);
+  background: var(--water);
 }
 
 :focus-visible {

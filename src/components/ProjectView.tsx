@@ -5,7 +5,7 @@ import { site, type Project } from "@/content/site";
 const PANEL = "rounded-[20px] bg-white/55 backdrop-blur-[24px]";
 const SHADOW = "[text-shadow:0_1px_8px_rgb(0_40_45/0.5)]";
 
-// A project's page, over plain pond water (the wrapper supplies the water).
+// A project's page, over the pond (the page supplies the water).
 // The opening transition on the home page draws this same view, so the page
 // it navigates to lines up with its last frame. The title is a single size
 // per breakpoint with leading-none: the transition flies the card's name
@@ -13,17 +13,17 @@ const SHADOW = "[text-shadow:0_1px_8px_rgb(0_40_45/0.5)]";
 export function ProjectView({ project, titleRef, hideTitle }: { project: Project; titleRef?: Ref<HTMLHeadingElement>; hideTitle?: boolean }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6 lg:mr-auto lg:ml-[max(0px,calc(50%-588px))]">
-      <header className="relative -top-[7px] flex h-16 items-center justify-between text-foam">
+      <header className={`relative -top-[7px] flex h-16 items-center justify-between text-foam ${SHADOW}`}>
         <Link href="/" className="font-medium">
           {site.name}
         </Link>
-        <a href={site.github} target="_blank" rel="noreferrer" className="text-sm text-foam/80 transition-colors hover:text-foam">
+        <a href={site.github} target="_blank" rel="noreferrer" className="text-sm">
           GitHub
         </a>
       </header>
 
       <main className="flex max-w-3xl flex-1 flex-col gap-7 pt-10 pb-24">
-        <Link href="/#projects" className="self-start text-sm font-medium text-foam/90 transition-colors hover:text-foam">
+        <Link href="/#projects" className={`self-start text-sm font-medium text-foam transition-colors ${SHADOW}`}>
           ← All projects
         </Link>
         <h1 ref={titleRef} className={`font-signature text-6xl leading-none font-normal text-foam italic sm:text-8xl ${SHADOW} ${hideTitle ? "invisible" : ""}`}>
@@ -63,8 +63,8 @@ export function ProjectView({ project, titleRef, hideTitle }: { project: Project
         )}
       </main>
 
-      <footer className="flex h-16 items-center text-sm text-foam/80">
-        <a href={site.github} target="_blank" rel="noreferrer" className="transition-colors hover:text-foam">
+      <footer className={`flex h-16 items-center text-sm text-foam ${SHADOW}`}>
+        <a href={site.github} target="_blank" rel="noreferrer">
           github.com/Stephen316
         </a>
       </footer>
